@@ -298,6 +298,7 @@ function Task() {
   this._sort_order = null;
 
   this._status = null;
+  this._completed = null;
   this._tags = null;
   this._deadline = null;
   this._deleted = false;
@@ -316,7 +317,7 @@ addAccessors(Task, [
   "!id", "!title", "!notes",
   "!created", "updated",
   "!parent", "!sort_order",
-  "!status",
+  "!status", "!completed",
   "!tags", "!deadline", "!deleted", "!scheduled", "!work_history", "!recurring",
   "!defer",
 
@@ -632,12 +633,14 @@ TaskView.prototype.statusChanged = function () {
 TaskView.prototype.clickedContainer = function (e) {
   var controller = this.controller().taskSelectionController();
 
-  if (e.shiftKey) {
-    controller.addToSelection(this);
-  } else if (e.ctrlKey) {
-    controller.toggleSelection(this);
-  } else {
-    controller.setSelection(this);
+  if (e.which === 1) {
+    if (e.shiftKey) {
+      controller.addToSelection(this);
+    } else if (e.ctrlKey) {
+      controller.toggleSelection(this);
+    } else {
+      controller.setSelection(this);
+    }
   }
 };
 
@@ -750,7 +753,11 @@ TaskView.prototype.handleDragLeave = function (e) {
 TaskView.prototype.handleDrop = function (e) {
   e.stopPropagation();
   if (this.controller().dragController().draggedTasks()) {
-    _.each(this.controller().dragController().draggedTasks(), function (task) {
+    var toDrop = this.controller().dragController().draggedTasks().slice(0);
+    toDrop.sort(function (a, b) {
+      return Task.compare(a, b);
+    });
+    _.each(toDrop, function (task) {
       this.task().addSubtask(task);
     }, this);
     this.controller().dragController().endDrag();
@@ -823,8 +830,6 @@ TaskListView.prototype.clear = function () {
 };
 
 TaskListView.prototype.updateSubtasks = function (newTasks) {
-  this.$el.children(".TaskListView-interitem-drop").remove();
-
   var old_stvs = {};
   _.each(this.subtaskViews(), function (stv) {
     if (!stv.task().deleted() && this.oldTaskViewFilter()(stv)) {
@@ -850,6 +855,13 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
   new_stvs.sort(function (a, b) {
     return Task.compare(a.task(), b.task());
   });
+
+  if (_.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) { return stvs[0] === stvs[1]; })) {
+    console.log("skipping updateSubtasks");
+    return this;
+  }
+  console.log("noskip");
+  this.$el.children(".TaskListView-interitem-drop").remove();
 
   function MakeDropTarget(after_id) {
     var $drop = $('<div class="TaskListView-interitem-drop">').appendTo(this.$el);
@@ -919,7 +931,11 @@ TaskListView.prototype.handleDrop = function (e) {
   if (this.controller().dragController().draggedTasks()) {
     var insert_id = target.attr("insert-after");
     var after_stv = _.find(this.subtaskViews(), function (stv) { return stv.task().id() === insert_id; });
-    _.each(this.controller().dragController().draggedTasks(), function (task) {
+    var toInsert = this.controller().dragController().draggedTasks().slice(0);
+    toInsert.sort(function (a, b) {
+      return Task.compare(b, a);
+    });
+    _.each(toInsert, function (task) {
       if (after_stv) {
         this.insertionFunction()(task, after_stv.task());
       } else {
@@ -1013,6 +1029,8 @@ InboxView.prototype.render = function ($dest) {
   this.$sweep = $('<div>Sweep</div>').appendTo(this.$el);
   this.$create = $('<div>Create</div>').appendTo(this.$el);
 
+  this.$listHolder = $('<div class="listholder">').appendTo(this.$el);
+
   this.taskListView(TaskListView.create(this.controller()));
   this.taskListView().showSubtasks(true);
   this.taskListView().oldTaskViewFilter(function (tv) {
@@ -1036,7 +1054,7 @@ InboxView.prototype.render = function ($dest) {
     this._inboxtasks.push(task);
     correctSortOrder(this._inboxtasks);
   }));
-  this.taskListView().render(this.$el);
+  this.taskListView().render(this.$listHolder);
 
   var self = this;
   this.$sweep.on("click", function (e) {
@@ -1061,7 +1079,9 @@ InboxView.prototype.refresh = function (/*opt*/sweep) {
     .value();
 
   this.taskListView().updateSubtasks(this._inboxtasks);
+};
 
+InboxView.prototype.hashArgument = function (arg) {
 };
 
 function DragController() {
@@ -1127,6 +1147,10 @@ TaskSelectionController.prototype.selectionOn = function (task) {
   return this;
 };
 
+function ViewOptionsController() {
+  this._projectCompletedItems = false;
+}
+
 function MainController() {
   this._taskDB = null;
   this._dragController = null;
@@ -1136,15 +1160,80 @@ addAccessors(MainController, [
   "!taskDB", "!dragController", "!taskSelectionController"
 ]);
 
+function MainLayoutManager($container, controller) {
+  this.defaultView = "inbox";
+  this.$container = $container;
+  this.controller = controller;
+
+  this.views = {};
+  this.activeView = null;
+
+  this.viewLoaders = {
+    "inbox" : function () {
+      return InboxView.create(controller);
+    }
+  };
+
+  $(window).on("hashchange", _.im(this, "handleHashChange"));
+  this.handleHashChange();
+}
+MainLayoutManager.prototype.handleHashChange = function () {
+  var hash = window.location.hash.slice(1);
+  if (!hash) {
+    window.location.hash = this.defaultView;
+    return;
+  }
+  var hashparts = hash.split('/');
+  this.activate(hashparts[0], hashparts.slice(1).join('/'));
+};
+
+MainLayoutManager.prototype.activate = function (viewname, args) {
+  if (!_.has(this.viewLoaders, viewname)) {
+    viewname = this.defaultView;
+    window.location.hash = viewname;
+    return;
+  }
+  if (!_.has(this.views, viewname)) {
+    this.loadView(viewname);
+  }
+
+  $("#navigation .navitem").each(function () {
+    $(this).toggleClass("selected", $(this).attr('data-dest') === viewname);
+  });
+  this.controller.taskSelectionController().clearSelection();
+
+  _.each(this.views, function (view, name) {
+    if (name === viewname) {
+      view.panel.show();
+      this.activeView = view;
+    } else {
+      view.panel.hide();
+    }
+  }, this);
+  this.activeView.view.hashArgument(args);
+};
+MainLayoutManager.prototype.loadView = function (viewname) {
+  var view = this.viewLoaders[viewname]();
+  var panel = $('<div class="main_panel">').appendTo(this.$container);
+  this.views[viewname] = {
+    name : viewname, view : view, panel : panel
+  };
+  view.render(panel);
+};
+
 $(function () {
+
+  $(".navitem").on("click", function (e) {
+    if (e.which === 1) {
+      e.preventDefault();
+      window.location.hash = $(e.target).closest('[data-dest]').attr('data-dest');
+    }
+  });
+
   var tdb = new TaskDatabase();
 
   window.tdb = tdb;
 
-  var controller = new MainController();
-  controller.taskDB(tdb);
-  controller.dragController(new DragController());
-  controller.taskSelectionController(new TaskSelectionController());
 
   var t = tdb.createTask().title("A task").notes("This is the note.");
   var t2 = tdb.createTask().title("Another task");
@@ -1152,8 +1241,17 @@ $(function () {
 
   t.addSubtask(t2);
 
-  var inboxView = InboxView.create(controller);
-  inboxView.render($("body"));
+  var controller = new MainController();
+  controller.taskDB(tdb);
+  controller.dragController(new DragController());
+  controller.taskSelectionController(new TaskSelectionController());
+
+  window.controller = controller;
+
+  var mlm = new MainLayoutManager($('#main'), controller);
+
+//  var inboxView = InboxView.create(controller);
+//  inboxView.render($("#main"));
 
 //  inboxView.refresh();
 

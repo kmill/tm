@@ -1,5 +1,114 @@
-body {
-    width: 500px;
+html, body {
+    margin: 0;
+    padding: 0;
+}
+
+#header {
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 50px;
+    box-sizing: border-box;
+    background: #e1e2e3;
+    border-bottom: 1px solid #999;
+}
+
+#navigation {
+    position: absolute;
+    top: 50px; bottom: 30px; left: 0; width: 70px;
+    box-sizing: border-box;
+    background: #aaa;
+    border-right: 1px solid #333;
+}
+
+#main {
+    position: absolute;
+    top: 50px; bottom: 30px; right: 0; left: 70px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.main_panel {
+    width: 100%; height: 100%;
+    overflow: auto;
+}
+
+#footer {
+    position: absolute;
+    bottom: 0; left: 0; right: 0; height: 30px;
+    box-sizing: border-box;
+    background: #e1e2e3;
+    border-top: 1px solid #999;
+}
+
+.header_left {
+    position: absolute;
+    bottom: 8px; left: 8px; top: 8px;
+}
+.header_right {
+    position: absolute;
+    bottom: 8px; right: 8px; top: 8px;
+}
+
+#main_search {
+    border: none;
+    padding: 0.4em 0.6em;
+    margin: 0.4em;
+    width: 300px;
+}
+#main_search:focus {
+    outline: none;
+}
+
+.noselect {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+    -webkit-user-drag: none;
+    user-drag: none;
+}
+
+.navitem {
+    display: block;
+    cursor: default;
+    text-decoration: none;
+    box-sizing: border-box;
+    height: 70px;
+    width: 70px;
+    padding: 4px;
+    background: #aaa;
+
+    border-bottom: 1px solid #333;
+    border-left: 1px solid #aaa;
+    border-right: 1px solid #333;
+}
+.navitem.selected {
+    background: #888;
+    background: #fff;
+    border-right-color: #fff;
+}
+
+.navitem:active {
+    background: #999;
+}
+
+.navlabel {
+    display: inline-block;
+    color: #fff;
+    text-align: center;
+    vertical-align: middle;
+    font-size: 10pt;
+    font-family: sans-serif;
+    font-weight: bold;
+}
+.selected .navlabel {
+    color: #333;
+}
+
+.listholder {
+    padding: 2px;
 }
 
 .TaskView {
@@ -9,6 +118,7 @@ body {
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
+    margin: 2px 0;
 }
 
 .TaskView-dragDest {
@@ -30,7 +140,7 @@ body {
 
 .TaskView-container {
     position: relative;
-    border-width: 0 0 0 5px;
+    border-width: 0 5px 0 5px;
     border-color: #fff;
     border-style: solid;
     padding: 2pt 3pt;

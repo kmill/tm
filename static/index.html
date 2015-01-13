@@ -11,5 +11,19 @@
     <link rel="shortcut icon" href="/static/favicon.png">
   </head>
   <body>
+    <div id="header" class="noselect">
+      <div class="header_left">Header left</div>
+      <div class="header_right">
+        <input id="main_search" type="text" placeholder="Search..."/>
+      </div>
+    </div>
+    <div id="navigation" class="noselect">
+      <div class="navitem" data-dest="inbox"><span class="navlabel">Inbox</span></div>
+      <div class="navitem" data-dest="projects"><span class="navlabel">Projects</span></div>
+      <div class="navitem" data-dest="deferred"><span class="navlabel">Deferred</span></div>
+      <div class="navitem" data-dest="review"><span class="navlabel">Review</span></div>
+    </div>
+    <div id="main"></div>
+    <div id="footer" class="noselect">Footer</div>
   </body>
 </html>

@@ -1,0 +1,126 @@
+body {
+    width: 500px;
+}
+
+.TaskView {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.TaskView-dragDest {
+    display: none;
+    position: absolute;
+    top: -2px; left: -7px;
+    z-index: 22;
+}
+.TaskView-dragDest.active {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+.TaskView-dragDest.visible {
+    box-sizing: border-box;
+    border: 3px solid #ccf;
+    border-radius: 3px;
+}
+
+.TaskView-container {
+    position: relative;
+    border-width: 0 0 0 5px;
+    border-color: #fff;
+    border-style: solid;
+    padding: 2pt 3pt;
+}
+.TaskView-container:hover {
+    border-color: #999;
+}
+.TaskView-container.selected {
+    border-color: #ccf;
+}
+
+.TaskView-main {
+
+}
+
+.TaskView-titleArea {
+    overflow: hidden;
+}
+.TaskView-title {
+    font-size: 12pt;
+    font-weight: bold;
+    font-family: sans-serif;
+    border: none;
+    padding: 0 4px;
+    width: 100%;
+    box-sizing: border-box;
+    text-overflow: ellipsis;
+}
+.TaskView-title:focus {
+    outline: none;
+}
+.TaskView-title::-webkit-input-placeholder {
+    color: #999;
+}
+.TaskView-title::-moz-placeholder {
+    color: #999;
+}
+
+.TaskView-check {
+    float: right;
+}
+
+.TaskView-notes {
+    padding-left: 8px;
+}
+.TaskView-notes .CodeMirror {
+    font-family: sans-serif;
+    font-size: 11pt;
+    height: auto;
+/*    border: 1px solid #999;*/
+/*    border-width: 0 0 0 1px; */
+}
+
+.TaskView-notes pre.CodeMirror-placeholder {
+    color: #999;
+}
+
+.TaskDragIcon {
+    font-size: 8px;
+    font-family: sans-serif;
+    width: 50px;
+    display: block;
+    padding: 2px 2px;
+    background-color: #fff;
+    border: 1px solid #000;
+    position: fixed;
+    left: 0; top: 0;
+}
+
+.TaskListView {
+    position: relative;
+}
+.TaskListView-interitem-drop {
+    position: absolute;
+    height: 12px; width: 100%;
+    margin-top: -6px;
+    overflow: hidden;
+    z-index: 23;
+    display: none;
+}
+.TaskListView-interitem-drop-target {
+    height: 4px; width: 100%;
+    margin-top: 4px;
+    position: relative;
+    pointer-events: none;
+}
+
+.TaskListView-interitem-drop.active {
+    display: block;
+}
+.active.visible .TaskListView-interitem-drop-target {
+    background: #ccf;
+}

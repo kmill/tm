@@ -399,7 +399,7 @@ Task.compare = function (a, b) {
 Task.prototype.detachParent = function () {
   if (this.parent() !== null) {
     this.parent().removeSubtask(this);
-    this.parent(null).sort_order(null);
+    this.parent(null).sort_order(_.now());
   }
   return this;
 };
@@ -514,11 +514,142 @@ addAccessors(WorkHistoryItem, [
 
 // Views
 
+function ProjectSelector() {
+  this._controller = null;
+  this._active = false;
+  this._task = null;
+}
+ProjectSelector.nextNamespaceId = 0;
+addAccessors(ProjectSelector, [
+  "!controller", "!task"
+]);
+ProjectSelector.create = function (controller) {
+  var ps = new ProjectSelector();
+  ps.controller(controller);
+  return ps;
+};
+
+ProjectSelector.prototype.render = function ($dest) {
+  this.$cloak = $('<div class="context-menu-cloak">').appendTo($dest);
+  this.$el = $('<div class="context-menu">').appendTo($dest);
+  this.$projectList = $('<ul>').appendTo(this.$el);
+
+  this.$cloak.on("click contextmenu", _.im(this, function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.deactivate();
+  }));
+
+  this.$el.on("click", _.im(this, function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.deactivate();
+  }));
+  this.$el.on("contextmenu", _.im(this, function (e) {
+    e.preventDefault();
+    this.$el.click();
+  }));
+
+  return this;
+};
+
+ProjectSelector.prototype.activate = function (task, $target, /*opt*/closeCallback) {
+  this._closeCallback = closeCallback || _.noop;
+  this.task(task);
+  this._active = true;
+  $target = $($target);
+  this.$cloak.show();
+  this.$el.show();
+
+  this.fillProjects();
+  this.$el.css("max-height", "none");
+  this.$el.css("width", "");
+
+  var toffset = $target.offset(),
+      twidth = $target.outerWidth(),
+      theight = $target.outerHeight(),
+      myheight = this.$el.outerHeight();
+
+  if (toffset.top + theight + myheight < $(window).height()) {
+    // below full
+    this.$el.css("top", (toffset.top + theight) + "px");
+  } else if (myheight < toffset.top) {
+    // above full
+    this.$el.css("top", (toffset.top - myheight) + "px");
+  } else if (toffset.top < $(window).height() - toffset.top - theight) {
+    // below partial
+    this.$el.css("top", (toffset.top + theight) + "px");
+    this.$el.css("max-height", ($(window).height() - toffset.top - theight) + "px");
+    this.$el.css("width", this.$el.width() + 20);
+  } else {
+    // above partial
+    this.$el.css("top", "0px");
+    this.$el.css("max-height", (toffset.top) + "px");
+    this.$el.css("width", this.$el.width() + 20);
+  }
+  // should it be to the right or the left?
+  if (toffset.left + this.$el.width() < $(window).width()) {
+    this.$el.css("left", (toffset.left) + "px");
+  } else {
+    this.$el.css("left", (toffset.left + twidth - this.$el.width()) + "px");
+  }
+};
+
+ProjectSelector.prototype.deactivate = function () {
+  this.$cloak.hide();
+  this.$el.hide();
+  this._closeCallback();
+};
+
+ProjectSelector.prototype.fillProjects = function () {
+  this.$projectList.empty();
+  var $remove = $('<li>').appendTo(this.$projectList);
+  $remove.prepend($('<span class="ProjectSelector-projecticon">'));
+  $remove.append($('<span class="ProjectSelector-projectname">').text("No project"));
+  $remove.on("click", _.im(this, function (e) {
+    this.task().detachParent();
+  }));
+  $('<li class="context-menu-divider">').appendTo(this.$projectList);
+
+  function addProject(project, indent) {
+    var $item = $('<li>').appendTo(this.$projectList);
+    var $indent = $('<span class="ProjectSelector-indent">').appendTo($item);
+    $indent.css("width", (16 * indent) + "px");
+    var $icon = $('<span class="ProjectSelector-projecticon">').appendTo($item);
+    $icon.append(icon_for_project_type(project.project_type()));
+    var $text = $('<span class="ProjectSelector-projectname">').appendTo($item);
+    if (project.title()) {
+      $text.text(project.title());
+    } else {
+      $text.addClass("noname");
+    }
+
+    $item.on("click", _.im(this, function(e) {
+      project.addSubtask(this.task());
+    }));
+
+    var subprojects = _.filter(project.activeSubtasks(),
+                               function (st) { return st.project_type(); });
+    subprojects.sort(Task.compare);
+
+    _.each(subprojects, function (sp) {
+      addProject.call(this, sp, indent+1);
+    }, this);
+  }
+
+  var projects = this.controller().taskDB().getProjects();
+  projects.sort(Task.compare);
+  _.each(projects, function (project) {
+    addProject.call(this, project, 0);
+  }, this);
+};
+
 function TaskView() {
   this._controller = null;
   this._task = null;
   this._indent = 0;
   this._showSubtasks = false;
+  this._asSubtask = false;
 
   this._taskListView = null;
 
@@ -529,7 +660,7 @@ TaskView.create = function (controller, task) {
   return tv.task(task).controller(controller);
 };
 addAccessors(TaskView, [
-  "!controller", "!indent", "!showSubtasks", "!taskListView"
+  "!controller", "!indent", "!showSubtasks", "!taskListView", "!asSubtask"
 ]);
 
 TaskView.prototype.task = function (/*opt*/task) {
@@ -628,12 +759,26 @@ TaskView.prototype.render = function ($dest) {
   this.status(this.task().status());
 
   var $secondArea = $('<div class="TaskView-secondArea">').appendTo(this.$titleArea);
-  this.$notesButton = $('<div class="fa fa-pencil TaskView-button transient">').appendTo($secondArea);
+  this.$notesButton = $('<div class="fa fa-pencil TaskView-button transient" title="Notes">').appendTo($secondArea);
   this.$notesButton.on("click", _.im(this, function (e) {
     e.preventDefault();
     if (!this.notes) {
       this.makeNotesArea(this.task().notes());
+      this.notes.focus();
+    } else {
+      this.notes.focus();
     }
+  }));
+
+  $secondArea.append('<div class="TaskView-button-spacer">');
+  
+  this.$projectButton = $('<div class="TaskView-button transient" title="Project">').appendTo($secondArea);
+  this.$projectButton.on("click", _.im(this, function (e) {
+    this.$projectButton.addClass("active");
+    this.controller().projectSelector().activate(this.task(), this.$projectButton,
+                                                 _.im(this, function () {
+                                                   this.$projectButton.removeClass("active");        
+                                                 }));
   }));
 
   if (this.task().notes()) {
@@ -646,7 +791,7 @@ TaskView.prototype.render = function ($dest) {
     this.taskListView(TaskListView.create(this.controller()).indent(this.indent()+1));
     this.taskListView().viewFactory(_.im(this, function (task) {
       var tv = TaskView.create(this.controller(), task);
-      tv.showSubtasks(true);
+      tv.showSubtasks(true).asSubtask(true);
       return tv;
     }));
     this.taskListView().oldTaskViewFilter(_.im(this, function (tv) {
@@ -760,6 +905,13 @@ TaskView.prototype.updateProjectProperties = function () {
   this.$title.toggleClass("project", null !== this.task().project_type());
   this.$checkArea.toggle(null === this.task().project_type());
   this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
+
+  if (this.task().parent()) {
+    this.$projectButton.text(this.task().parent().title());
+  } else {
+    this.$projectButton.text("No project");
+  }
+  this.$projectButton.toggleClass("transient", this.asSubtask() || !this.task().parent());
 };
 
 TaskView.prototype.taskUpdated = function () {
@@ -971,6 +1123,7 @@ ProjectTaskView.prototype.render = function ($dest) {
 
 ProjectTaskView.prototype.refresh = function () {
   this.$title.text(this.task().title());
+  this.$title.toggleClass("noname", !this.task().title());
   this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
 
   if (this.taskListView()) {
@@ -1277,6 +1430,14 @@ TaskDatabase.prototype.handleUpdated = function (task) {
   this.events.notify("updated", task);
 };
 
+TaskDatabase.prototype.getProjects = function () {
+  return _.chain(this._tasks)
+    .filter(function (task) {
+      return task.parent() === null && task.status() === null && task.project_type() !== null;
+    })
+    .value();
+};
+
 function InboxView() {
   this._taskDB = null;
   this._controller = null;
@@ -1511,11 +1672,7 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
     this.taskListView().clear();
   }
 
-  this._projects = _.chain(this.taskDB()._tasks)
-    .filter(function (task) {
-      return task.parent() === null && task.status() === null && task.project_type() !== null;
-    })
-    .value();
+  this._projects = this.taskDB().getProjects();
   this.projectListView().updateSubtasks(this._projects);
 
   if (this.activeProject()) {
@@ -1625,9 +1782,11 @@ function MainController() {
   this._taskDB = null;
   this._dragController = null;
   this._taskSelectionController = null;
+  this._projectSelector = null;
 }
 addAccessors(MainController, [
-  "!taskDB", "!dragController", "!taskSelectionController"
+  "!taskDB", "!dragController", "!taskSelectionController",
+  "!projectSelector"
 ]);
 
 function MainLayoutManager($container, controller) {
@@ -1748,8 +1907,11 @@ $(function () {
   controller.dragController(new DragController());
   controller.taskSelectionController(new TaskSelectionController());
 
+  controller.projectSelector(ProjectSelector.create(controller).render($('body')));
+
   for (var i = 0; i < 50; i++) {
     tdb.createTask().title("This is task" + i);
+    tdb.createTask().title("Project" + i).project_type("parallel");
   }
 
   window.controller = controller;

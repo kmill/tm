@@ -309,12 +309,32 @@ html, body {
     color: #999;
     font-size: 11px;
     display: inline-block;
+
+   -webkit-touch-callout: none;
+   -webkit-user-select: none;
+   -khtml-user-select: none;
+   -moz-user-select: none;
+   -ms-user-select: none;
+   user-select: none;
+   cursor: default;
+   -webkit-user-drag: none;
+    user-drag: none;
+
 }
 .TaskView-button:not(.unbutton):hover {
     color: #555;
 }
 .TaskView-button.unbutton {
     color: #666;
+}
+
+.TaskView-button.active {
+    color: #666;
+}
+
+.TaskView-button-spacer {
+    display: inline-block;
+    width: 10px;
 }
 
 .TaskView-check {
@@ -368,6 +388,10 @@ html, body {
     text-overflow: ellipsis;
     background: transparent;
     padding: 0 4px;
+}
+.ProjectTaskView-title.noname:after {
+    color: #999;
+    content: 'Untitled';
 }
 
 .ProjectTaskView-container.active {
@@ -451,4 +475,83 @@ html, body {
     font-size:16px;
     line-height:1;
     display:inline-block;
+}
+
+
+.context-menu {
+   position: fixed;
+   z-index: 999;
+   font-size: 12px;
+   font-family: sans-serif;
+   display: none;
+   border: 1px solid rgba(0, 0, 0, 0.2);
+   padding: 3px 0;
+   border-radius: 5px;
+   background: #fff;
+   box-shadow: 3px 3px 5px #666;
+   box-sizing: border-box;
+
+   max-height: 100%;
+   overflow-y: auto;
+
+   -webkit-touch-callout: none;
+   -webkit-user-select: none;
+   -khtml-user-select: none;
+   -moz-user-select: none;
+   -ms-user-select: none;
+   user-select: none;
+   cursor: default;
+   -webkit-user-drag: none;
+    user-drag: none;
+}
+
+.context-menu ul {
+    margin: 0; padding: 0;
+    list-style: none;
+}
+.context-menu li {
+    display: block;
+    margin: 0;
+    padding: 4px 10px;
+    color: #333;
+    cursor: default;
+    overflow: hidden;
+    white-space: nowrap
+}
+.context-menu li:hover {
+    background: #6666ff;
+    color: #fff;
+}
+
+.context-menu li.context-menu-divider {
+    height: 1px;
+    background-color: #e5e5e5;
+    border-bottom: 1px solid #fff;
+    padding: 0;
+    margin: 2px 4px 1px 4px;
+}
+
+.context-menu-cloak {
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    background: transparent;
+    z-index: 998;
+    display: none;
+}
+
+.ProjectSelector-projecticon {
+    display: inline-block;
+    width: 20px;
+    color: #777;
+}
+li:hover .ProjectSelector-projecticon {
+    color: #aaa;
+}
+
+.ProjectSelector-indent {
+    display: inline-block;
+}
+.ProjectSelector-projectname.noname:after {
+    color: #999;
+    content: 'Untitled';
 }

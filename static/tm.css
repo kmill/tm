@@ -28,13 +28,12 @@ html, body {
     position: absolute;
     top: 50px; bottom: 30px; right: 0; left: 70px;
     box-sizing: border-box;
-    overflow: hidden;
+    z-index: 1;
 }
 
 .main_panel {
     width: 100%; height: 100%;
-    overflow: auto;
-background: #f1f2f3;
+    background: #f1f2f3;
 }
 
 #footer {
@@ -159,9 +158,18 @@ background: #f1f2f3;
 }
 
 .InboxView {
+    width: 100%;
+    height: 100%;
     position: relative;
-    width: 100%; height: 100%;
+}
+
+.InboxView-listholder {
+    padding: 2px;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
     background: #fff;
+    box-sizing: border-box;
 }
 
 .ProjectsView {
@@ -185,8 +193,26 @@ background: #f1f2f3;
     border-left: 3px solid #aaa;
 }
 
-.listholder {
-    padding: 2px;
+.ProjectsView-listholder {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.StatusLine {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+
+    position: absolute;
+    bottom: -22px;
+    padding: 0 24px;
+    font-size: 9pt;
+    color: #444;
 }
 
 .TaskView {
@@ -268,23 +294,35 @@ background: #f1f2f3;
 
 }
 
+.TaskView-secondArea {
+    padding: 0 4px;
+}
+.TaskView-secondArea .transient {
+    visibility: hidden;
+}
+.TaskView-container:hover .TaskView-secondArea .transient,
+.TaskView-container.selected .TaskView-secondArea .transient {
+    visibility: visible;
+}
+
+.TaskView-button {
+    color: #999;
+    font-size: 11px;
+    display: inline-block;
+}
+.TaskView-button:not(.unbutton):hover {
+    color: #555;
+}
+.TaskView-button.unbutton {
+    color: #666;
+}
+
 .TaskView-check {
     float: right;
 }
 
 .TaskView-notes {
-    padding-left: 8px;
-}
-.TaskView-notes::before {
-    content: '\f139';
-    float: left;
-
-    font-family: "Batch";
-    font-size: 12px;
-    color: #777;
-
-    line-height: 1.5;
-    display: inline-block;
+    padding-left: 4px;
 }
 .TaskView-notes .CodeMirror {
     font-family: sans-serif;

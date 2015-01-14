@@ -81,6 +81,19 @@ function generateGUID() {
           + "-" + _.now().toString(36));
 }
 
+function pluralize(n, singular, plural) {
+  if (plural === void 0) {
+    plural = singular + 's';
+  }
+  if (n === 0) {
+    return "0 " + plural;
+  } else if (n === 1) {
+    return "1 " + singular;
+  } else {
+    return n + " " + plural;
+  }
+}
+
 // Futures
 
 function Future(/*opt*/callbackAcceptor) {
@@ -298,6 +311,7 @@ function Task() {
   this._project_type = null;
   this._sort_order = null;
 
+  this._starred = false;
   this._status = null;
   this._status_changed = null;
 
@@ -319,7 +333,7 @@ addAccessors(Task, [
   "!id", "!title", "!notes",
   "!created", "updated",
   "!parent", "!project_type", "!sort_order",
-  "!status_changed",
+  "!status_changed", "!starred",
   "!tags", "!deadline", "!deleted", "!scheduled", "!work_history", "!recurring",
   "!defer",
 
@@ -507,6 +521,8 @@ function TaskView() {
   this._showSubtasks = false;
 
   this._taskListView = null;
+
+  this.notes = null;
 }
 TaskView.create = function (controller, task) {
   var tv = new TaskView();
@@ -571,6 +587,27 @@ TaskView.prototype.remove = function () {
   this.controller(null);
 };
 
+TaskView.prototype.makeNotesArea = function (initial) {
+  this.$notesButton.removeClass("transient").addClass("unbutton");
+  this.$notesArea = $('<div class="TaskView-notes">').appendTo(this.$titleArea);
+  this.notes = CodeMirror(this.$notesArea[0], {
+    value : initial,
+    mode : "text",
+    placeholder : "Notes...",
+    viewportMargin: Infinity,
+    extraKeys : {
+      Tab : false,
+      "Shift-Tab" : false,
+      "Shift-Enter" : function () {console.log("se"); }
+    }
+  });
+
+  this.notes.on("focus", _.im(this, "gainFocus"));
+  this.notes.on("blur", _.im(this, "loseFocus"));
+
+  this.notes.on("blur", _.im(this, "notesChanged"));
+};
+
 TaskView.prototype.render = function ($dest) {
   this.detach();
   this.$el = $('<div class="TaskView">').appendTo($dest);
@@ -581,27 +618,27 @@ TaskView.prototype.render = function ($dest) {
   this.$checkArea = $('<div class="TaskView-check">').appendTo(this.$container);
   var $mainArea = $('<div class="TaskView-main">').appendTo(this.$container);
   this.$iconArea = $('<div class="TaskView-iconArea">').appendTo($mainArea);
-  var $titleArea = $('<div class="TaskView-titleArea">').appendTo($mainArea);
+  this.$titleArea = $('<div class="TaskView-titleArea">').appendTo($mainArea);
 
   this.$dragDest = $('<div class="TaskView-dragDest">').appendTo(this.$container);
 
-  this.$title = $('<input class="TaskView-title" type="text" placeholder="Untitled">').appendTo($titleArea);
+  this.$title = $('<input class="TaskView-title" type="text" placeholder="Untitled">').appendTo(this.$titleArea);
   this.$title.val(this.task().title());
   this.$check = $('<input type="checkbox" tabindex="-1">').appendTo(this.$checkArea);
   this.status(this.task().status());
 
-  this.$notesArea = $('<div class="TaskView-notes">').appendTo(this.$container);
-  this.notes = CodeMirror(this.$notesArea[0], {
-    value : this.task().notes(),
-    mode : "text",
-    placeholder : "Notes...",
-    viewportMargin: Infinity,
-    extraKeys : {
-      Tab : false,
-      "Shift-Tab" : false,
-      "Shift-Enter" : function () {console.log("se"); }
+  var $secondArea = $('<div class="TaskView-secondArea">').appendTo(this.$titleArea);
+  this.$notesButton = $('<div class="fa fa-pencil TaskView-button transient">').appendTo($secondArea);
+  this.$notesButton.on("click", _.im(this, function (e) {
+    e.preventDefault();
+    if (!this.notes) {
+      this.makeNotesArea(this.task().notes());
     }
-  });
+  }));
+
+  if (this.task().notes()) {
+    this.makeNotesArea(this.task().notes());
+  }
 
   this.updateProjectProperties();
 
@@ -631,10 +668,6 @@ TaskView.prototype.render = function ($dest) {
   this.$title.on("change", _.im(this, "titleChanged"));
   this.$title.on("focus", _.im(this, "gainFocus"));
   this.$title.on("blur", _.im(this, "loseFocus"));
-  this.notes.on("focus", _.im(this, "gainFocus"));
-  this.notes.on("blur", _.im(this, "loseFocus"));
-
-  this.notes.on("blur", _.im(this, "notesChanged"));
 
   this.$check.on("change", _.im(this, "statusChanged"));
 
@@ -685,6 +718,9 @@ TaskView.prototype.clickedContainer = function (e) {
 TaskView.prototype.gainFocus = function () {
   this.$container.attr("draggable", "false");
   this.controller().taskSelectionController().setSelection(this);
+  if (this.$el[0].scrollIntoViewIfNeeded) {
+    this.$el[0].scrollIntoViewIfNeeded();
+  }
 };
 TaskView.prototype.loseFocus = function () {
   this.$container.attr("draggable", "true");
@@ -697,14 +733,10 @@ TaskView.prototype.focus = function () {
 
 TaskView.prototype.controllerSelect = function () {
   this.$container.toggleClass("selected", true);
-  this.$notesArea.show();
 };
 
 TaskView.prototype.controllerUnselect = function () {
   this.$container.toggleClass("selected", false);
-  if (!this.notes.getValue()) {
-    this.$notesArea.hide();
-  }
 };
 
 function icon_for_project_type(project_type) {
@@ -746,7 +778,9 @@ TaskView.prototype.taskUpdated = function () {
   }
 
   // note
-  if (this.task().notes() !== this.notes.getValue()) {
+  if (this.task().notes() && !this.notes) {
+    this.makeNotesArea(this.task().notes());
+  } else if (this.notes && this.task().notes() !== this.notes.getValue()) {
     var newNotes = this.task().notes();
     this.notes.setValue(newNotes);
     if (newNotes) {
@@ -1127,7 +1161,8 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
     return Task.compare(a.task(), b.task());
   });
 
-  if (new_stvs.length !== 0 && _.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) { return stvs[0] === stvs[1]; })) {
+  if (new_stvs.length !== 0 && new_stvs.length === this.subtaskViews().length
+      && _.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) {return stvs[0] === stvs[1]; })) {
     console.log("skipping updateSubtasks");
     return this;
   }
@@ -1298,7 +1333,9 @@ InboxView.prototype.remove = function () {
 InboxView.prototype.render = function ($dest) {
   this.$el = $('<div class="InboxView">').appendTo($dest);
 
-  this.$listHolder = $('<div class="listholder">').appendTo(this.$el);
+  this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+
+  this.$listHolder = $('<div class="InboxView-listholder">').appendTo(this.$el);
 
   this.taskListView(TaskListView.create(this.controller()));
   this.taskListView().viewFactory(_.im(this, function (task) {
@@ -1344,11 +1381,13 @@ InboxView.prototype.refresh = function (/*opt*/sweep) {
     })
     .value();
 
+  this.$status.text(pluralize(this._inboxtasks.length, "task"));
+
   this.taskListView().updateSubtasks(this._inboxtasks);
 };
 
 InboxView.prototype.hashArgument = function (arg) {
-  this.refresh(true);
+  this.refresh();
 };
 
 function ProjectsView() {
@@ -1415,6 +1454,8 @@ ProjectsView.prototype.render = function ($dest) {
   this.$projectListArea = $('<div class="ProjectsView-plist">').appendTo(this.$el);
   this.$projectTaskArea = $('<div class="ProjectsView-ptask">').appendTo(this.$el);
 
+  this.$status = $('<div class="StatusLine">').appendTo(this.$projectTaskArea);
+
   this.projectListView(TaskListView.create(this.controller()));
   this.projectListView()
     .viewFactory(_.im(this, function (task) {
@@ -1460,7 +1501,7 @@ ProjectsView.prototype.render = function ($dest) {
     .oldTaskViewFilter(_.im(this, function (tv) {
       return false;
     }));
-  this.taskListView().render(this.$projectTaskArea);
+  this.taskListView().render($('<div class="ProjectsView-listholder">').appendTo(this.$projectTaskArea));
 };
 
 ProjectsView.prototype.refresh = function (/*opt*/sweep) {
@@ -1484,8 +1525,11 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
     this.$projectListArea.find("[data-project-id]").each(function () {
       $(this).toggleClass("active", $(this).attr("data-project-id") === activeId);
     });
+
+    this.$status.text(pluralize(0, "task"));
   } else {
     this.taskListView().updateSubtasks([]);
+    this.$status.text("");
   }
 };
 
@@ -1497,7 +1541,7 @@ ProjectsView.prototype.hashArgument = function (arg) {
   if (_.has(this.controller().taskDB()._id_to_task, arg)) {
     this.activeProject(this.controller().taskDB()._id_to_task[arg] || null);
   }
-  if (!this.activeProject()) {
+  if (arg && !this.activeProject()) {
     window.location.hash = "projects";
     return;
   }
@@ -1703,6 +1747,10 @@ $(function () {
   controller.taskDB(tdb);
   controller.dragController(new DragController());
   controller.taskSelectionController(new TaskSelectionController());
+
+  for (var i = 0; i < 50; i++) {
+    tdb.createTask().title("This is task" + i);
+  }
 
   window.controller = controller;
 

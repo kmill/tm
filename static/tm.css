@@ -1,6 +1,9 @@
 html, body {
     margin: 0;
     padding: 0;
+
+    font-size: 11px;
+    font-family: sans-serif;
 }
 
 #header {
@@ -9,6 +12,8 @@ html, body {
     box-sizing: border-box;
     background: #e1e2e3;
     border-bottom: 1px solid #999;
+
+/*    background: linear-gradient(to top, #e1e2e3, #d1d2d3);*/
 }
 
 #navigation {
@@ -29,6 +34,7 @@ html, body {
 .main_panel {
     width: 100%; height: 100%;
     overflow: auto;
+background: #f1f2f3;
 }
 
 #footer {
@@ -37,11 +43,13 @@ html, body {
     box-sizing: border-box;
     background: #e1e2e3;
     border-top: 1px solid #999;
+
+    background: linear-gradient(to bottom, #e1e2e3, #d1d2d3);
 }
 
 .header_left {
     position: absolute;
-    bottom: 8px; left: 8px; top: 8px;
+    bottom: 8px; left: 8px; top: 4px;
 }
 .header_right {
     position: absolute;
@@ -70,24 +78,56 @@ html, body {
     user-drag: none;
 }
 
+.actionitem {
+    display: inline-block;
+    padding: 4px 3px 1px 3px;
+    color: #555;
+    margin-right: 6px;
+    box-sizing: border-box;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+.actionitem .batch-icon {
+    font-size: 24px;
+    display: block;
+    text-align: center;
+}
+.actionitem .label {
+    display: block;
+    text-align: center;
+    font-size: 10px;
+}
+.actionitem:active {
+    border-color: #888;
+    background-color: #888;
+    color: #eee;
+}
+
 .navitem {
     display: block;
+    position: relative;
     cursor: default;
     text-decoration: none;
     box-sizing: border-box;
     height: 70px;
     width: 70px;
-    padding: 4px;
+
     background: #aaa;
 
     border-bottom: 1px solid #333;
-    border-left: 1px solid #aaa;
+/*    border-left: 1px solid #aaa;*/
     border-right: 1px solid #333;
 }
 .navitem.selected {
     background: #888;
-    background: #fff;
-    border-right-color: #fff;
+    background: #fff;background: #f1f2f3;
+    border-right-color: #f1f2f3;
+}
+
+.navitem-noconnect.selected {
+/*    background: #fff;
+    border-right-color: #fff;*/
+    border-right-color: #333;
 }
 
 .navitem:active {
@@ -95,16 +135,54 @@ html, body {
 }
 
 .navlabel {
-    display: inline-block;
-    color: #fff;
-    text-align: center;
-    vertical-align: middle;
-    font-size: 10pt;
+    position: absolute;
+    top: 0px; right: 0px; bottom: 0px; left: 0px;
+    display: block;
+    color: #fff;     color: #333;
+    font-size: 11px;
     font-family: sans-serif;
     font-weight: bold;
+    border-left: 6px solid #aaa;
+    padding: 3px 5px;
 }
 .selected .navlabel {
     color: #333;
+}
+
+.navlabel .batch-icon {
+    display: block;
+    text-align: center;
+    margin-top: 6px;
+    margin-left: -3px;
+    font-size: 24px;
+    color: #333;
+}
+
+.InboxView {
+    position: relative;
+    width: 100%; height: 100%;
+    background: #fff;
+}
+
+.ProjectsView {
+    position: relative;
+    width: 100%; height: 100%;
+}
+.ProjectsView-plist {
+/*    background: #f1f2f3;*/
+    position: absolute;
+    top: 0; bottom: 0; left: 0; width: 300px;
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 4px 4px;
+}
+.ProjectsView-ptask {
+    background: white;
+    position: absolute;
+    top: 0; bottom: 0; left: 300px; right: 0;
+    padding: 2px;
+    box-sizing: border-box;
+    border-left: 3px solid #aaa;
 }
 
 .listholder {
@@ -141,9 +219,9 @@ html, body {
 .TaskView-container {
     position: relative;
     border-width: 0 5px 0 5px;
-    border-color: #fff;
+    border-color: transparent;
     border-style: solid;
-    padding: 2pt 3pt;
+    padding: 2px 3px;
 }
 .TaskView-container:hover {
     border-color: #999;
@@ -156,18 +234,23 @@ html, body {
 
 }
 
+.TaskView-iconArea {
+    float: left;
+    color: #777;
+}
+
 .TaskView-titleArea {
     overflow: hidden;
 }
 .TaskView-title {
-    font-size: 12pt;
-    font-weight: bold;
+    font-size: 14px;
     font-family: sans-serif;
     border: none;
     padding: 0 4px;
     width: 100%;
     box-sizing: border-box;
     text-overflow: ellipsis;
+    background: transparent;
 }
 .TaskView-title:focus {
     outline: none;
@@ -179,6 +262,12 @@ html, body {
     color: #999;
 }
 
+.TaskView-title.project {
+    font-size: 16px;
+    font-weight: bold;
+
+}
+
 .TaskView-check {
     float: right;
 }
@@ -186,18 +275,91 @@ html, body {
 .TaskView-notes {
     padding-left: 8px;
 }
+.TaskView-notes::before {
+    content: '\f139';
+    float: left;
+
+    font-family: "Batch";
+    font-size: 12px;
+    color: #777;
+
+    line-height: 1.5;
+    display: inline-block;
+}
 .TaskView-notes .CodeMirror {
     font-family: sans-serif;
-    font-size: 11pt;
+    font-size: 12px;
     height: auto;
+    color: #777;
 /*    border: 1px solid #999;*/
 /*    border-width: 0 0 0 1px; */
 }
 
 .TaskView-notes pre.CodeMirror-placeholder {
-    color: #999;
+    color: #ccc;
 }
 
+/* project task view */
+
+.ProjectTaskView {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.ProjectTaskView-container {
+    position: relative;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 2px 3px;
+}
+
+.ProjectTaskView-iconArea {
+    display: inline-block;
+    color: #777;
+}
+
+.ProjectTaskView-title {
+    display: inline-block;
+    font-size: 16px;
+    font-weight: bold;
+    font-family: sans-serif;
+    text-overflow: ellipsis;
+    background: transparent;
+    padding: 0 4px;
+}
+
+.ProjectTaskView-container.active {
+    background: #ccc;
+}
+
+.ProjectTaskView-container.selected {
+    background: #ccf;
+}
+
+.ProjectTaskView-dragDest {
+    display: none;
+    position: absolute;
+    top: -2px; left: -2px;
+    z-index: 22;
+}
+.ProjectTaskView-dragDest.active {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+.ProjectTaskView-dragDest.visible {
+    box-sizing: border-box;
+    border: 3px solid #ccf;
+    border-radius: 3px;
+}
+
+
+
+/* TODO:REMOVE */
 .TaskDragIcon {
     font-size: 8px;
     font-family: sans-serif;
@@ -233,4 +395,22 @@ html, body {
 }
 .active.visible .TaskListView-interitem-drop-target {
     background: #ccf;
+}
+
+@font-face{
+    font-family:Batch;
+    src:url('/static/batch-icons/Webfont/batch-icons-webfont.eot');
+    src:url('/static/batch-icons/Webfont/batch-icons-webfont.eot?#iefix') format('embedded-opentype'),
+    url('/static/batch-icons/Webfont/batch-icons-webfont.woff') format('woff'),
+    url('/static/batch-icons/Webfont/batch-icons-webfont.ttf') format('truetype'),
+    url('/static/batch-icons/Webfont/batch-icons-webfont.svg#batchregular') format('svg');
+    font-weight:normal;
+    font-style:normal;
+}
+
+.batch-icon {
+    font-family:"Batch";
+    font-size:16px;
+    line-height:1;
+    display:inline-block;
 }

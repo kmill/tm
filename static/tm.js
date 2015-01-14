@@ -295,10 +295,12 @@ function Task() {
   this._updated = null;
 
   this._parent = null;
+  this._project_type = null;
   this._sort_order = null;
 
   this._status = null;
-  this._completed = null;
+  this._status_changed = null;
+
   this._tags = null;
   this._deadline = null;
   this._deleted = false;
@@ -316,8 +318,8 @@ function Task() {
 addAccessors(Task, [
   "!id", "!title", "!notes",
   "!created", "updated",
-  "!parent", "!sort_order",
-  "!status", "!completed",
+  "!parent", "!project_type", "!sort_order",
+  "!status_changed",
   "!tags", "!deadline", "!deleted", "!scheduled", "!work_history", "!recurring",
   "!defer",
 
@@ -328,6 +330,36 @@ addAccessors(Task, [
 addAccessors(Task, [
   "!version"
 ]);
+
+Task.statuses = [null, "done"];
+Task.prototype.status = function (/*opt*/status) {
+  if (arguments.length > 0) {
+    if (!_.contains(Task.statuses, status)) {
+      throw new Error("Invalid status " + status);
+    }
+    this._status = status;
+    this.status_changed(_.now());
+    this.update();
+    return this;
+  } else {
+    return this._status;
+  }
+};
+
+Task.project_types = [null, "single action", "parallel", "sequential"];
+Task.prototype.project_type = function (/*opt*/project_type) {
+  if (arguments.length > 0) {
+    if (!_.contains(Task.project_types, project_type)) {
+      throw new Error("Invalid project type " + project_type);
+    }
+    this._project_type = project_type;
+    this.update();
+    return this;
+  } else {
+    return this._project_type;
+  }
+};
+
 Task.prototype.update = function (prop) {
   this._updated = _.now();
   if (!this.modified) {
@@ -475,8 +507,6 @@ function TaskView() {
   this._showSubtasks = false;
 
   this._taskListView = null;
-
-  this.selected = false;
 }
 TaskView.create = function (controller, task) {
   var tv = new TaskView();
@@ -548,22 +578,23 @@ TaskView.prototype.render = function ($dest) {
   this.$container = $('<div class="TaskView-container" draggable="true">').appendTo(this.$el);
   this.updateIndent();
 
-  var $checkArea = $('<div class="TaskView-check">').appendTo(this.$container);
+  this.$checkArea = $('<div class="TaskView-check">').appendTo(this.$container);
   var $mainArea = $('<div class="TaskView-main">').appendTo(this.$container);
+  this.$iconArea = $('<div class="TaskView-iconArea">').appendTo($mainArea);
   var $titleArea = $('<div class="TaskView-titleArea">').appendTo($mainArea);
 
   this.$dragDest = $('<div class="TaskView-dragDest">').appendTo(this.$container);
 
   this.$title = $('<input class="TaskView-title" type="text" placeholder="Untitled">').appendTo($titleArea);
   this.$title.val(this.task().title());
-  this.$check = $('<input type="checkbox" tabindex="-1">').appendTo($checkArea);
+  this.$check = $('<input type="checkbox" tabindex="-1">').appendTo(this.$checkArea);
   this.status(this.task().status());
 
   this.$notesArea = $('<div class="TaskView-notes">').appendTo(this.$container);
   this.notes = CodeMirror(this.$notesArea[0], {
     value : this.task().notes(),
     mode : "text",
-    placeholder : "Notes",
+    placeholder : "Notes...",
     viewportMargin: Infinity,
     extraKeys : {
       Tab : false,
@@ -572,8 +603,15 @@ TaskView.prototype.render = function ($dest) {
     }
   });
 
+  this.updateProjectProperties();
+
   if (this.showSubtasks()) {
     this.taskListView(TaskListView.create(this.controller()).indent(this.indent()+1));
+    this.taskListView().viewFactory(_.im(this, function (task) {
+      var tv = TaskView.create(this.controller(), task);
+      tv.showSubtasks(true);
+      return tv;
+    }));
     this.taskListView().oldTaskViewFilter(_.im(this, function (tv) {
       return tv.task().parent() === this.task();
     }));
@@ -669,8 +707,33 @@ TaskView.prototype.controllerUnselect = function () {
   }
 };
 
+function icon_for_project_type(project_type) {
+  switch (project_type) {
+  case "single action" :
+    return ($('<div class="batch-icon">&#xf0e4;</div>'));
+    break;
+  case "parallel" :
+    return ($('<div class="batch-icon">&#xf11b;</div>'));
+    break;
+  case "sequential" :
+    return ($('<div class="batch-icon">&#xf0a7;</div>'));
+    break;
+  default:
+    break;
+  }
+
+}
+
+TaskView.prototype.updateProjectProperties = function () {
+  this.$title.toggleClass("project", null !== this.task().project_type());
+  this.$checkArea.toggle(null === this.task().project_type());
+  this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
+};
+
 TaskView.prototype.taskUpdated = function () {
   if (!this.$el) return;
+
+  this.updateProjectProperties();
 
   // title
   if (this.task().title() !== this.$title.val()) {
@@ -766,10 +829,215 @@ TaskView.prototype.handleDrop = function (e) {
   }
 };
 
+function ProjectTaskView() {
+  this._controller = null;
+  this._task = null;
+  this._indent = 0;
+  this._taskListView = null;
+  this._click = null;
+}
+ProjectTaskView.create = function (controller, task) {
+  var tv = new ProjectTaskView();
+  return tv.task(task).controller(controller);
+};
+addAccessors(ProjectTaskView, [
+  "!controller", "!indent", "!taskListView", "!click"
+]);
+
+ProjectTaskView.prototype.task = function (/*opt*/task) {
+  if (arguments.length > 0) {
+    this._task = task;
+    if (this.removeTaskUpdateHandler) {
+      this.removeTaskUpdateHandler();
+    }
+    this.removeTaskUpdateHandler = task ? task.events.on("updated", _.im(this, "refresh")) : null;
+    return this;
+  } else {
+    return this._task;
+  }
+};
+
+ProjectTaskView.prototype.controller = function (/*opt*/controller) {
+  if (arguments.length > 0) {
+    this._controller = controller;
+    if (this.removeDragStartHandler) {
+      this.removeDragStartHandler();
+      this.removeDragEndHandler();
+    }
+    this.removeDragStartHandler = controller ? controller.dragController().events.on("dragstart", _.im(this, "controllerDragStart")) : null;
+    this.removeDragEndHandler = controller ? controller.dragController().events.on("dragend", _.im(this, "controllerDragEnd")) : null;
+    return this;
+  } else {
+    return this._controller;
+  }
+};
+
+ProjectTaskView.prototype.updateIndent = function () {
+  if (this.$el) {
+    this.$container.css("padding-left", indentPadding(this.indent()) + "px");
+  }
+  return this;
+};
+
+ProjectTaskView.prototype.detach = function () {
+  if (this.taskListView()) {
+    this.taskListView().remove();
+  }
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+
+ProjectTaskView.prototype.render = function ($dest) {
+  this.detach();
+  this.$el = $('<div class="ProjectTaskView">').appendTo($dest);
+  this.$container = $('<div class="ProjectTaskView-container" draggable="true">').appendTo(this.$el);
+  this.$container.attr("data-project-id", this.task().id());
+  this.updateIndent();
+
+  this.$iconArea = $('<div class="ProjectTaskView-iconArea">').appendTo(this.$container);
+  this.$title = $('<div class="ProjectTaskView-title">').appendTo(this.$container);
+
+  this.$dragDest = $('<div class="ProjectTaskView-dragDest">').appendTo(this.$container);
+
+  this.taskListView(TaskListView.create(this.controller()));
+  this.taskListView()
+    .indent(this.indent()+1)
+    .viewFactory(_.im(this, function (task) {
+      var tv = ProjectTaskView.create(this.controller(), task);
+      tv.click(this.click());
+      return tv;
+    }))
+    .oldTaskViewFilter(_.im(this, function (tv) {
+      return tv.task().parent() === this.task();
+    }))
+    .insertionFunction(_.im(this, function (task, after) {
+      if (after === void 0) {
+        this.task().addSubtask(task, firstSortOrder(this.task().subtasks()));
+      } else {
+        this.task().addSubtask(task, afterSortOrder(this.task().subtasks(), after));
+      }
+    }));
+  this.$subtasks = $('<div class="ProjectTaskView-subtasks">').appendTo(this.$el);
+  this.taskListView().render(this.$subtasks);
+
+  this.$container.on("click", _.im(this, "clickedContainer"));
+
+  this.$container.on("dragstart", _.im(this, "handleDragStart"));
+  this.$container.on("dragend", _.im(this, "handleDragEnd"));
+  this.$dragDest.on("dragover drageenter", _.im(this, "handleDragOver"));
+  this.$dragDest.on("dragleave", _.im(this, "handleDragLeave"));
+  this.$dragDest.on("drop", _.im(this, "handleDrop"));
+
+  this.controllerUnselect();
+
+  this.refresh();
+};
+
+ProjectTaskView.prototype.refresh = function () {
+  this.$title.text(this.task().title());
+  this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
+
+  if (this.taskListView()) {
+    this.taskListView().updateSubtasks(_.filter(this.task().activeSubtasks(),
+                                               function (task) {
+                                                 return task.project_type() !== null;
+                                               }));
+  }
+};
+
+ProjectTaskView.prototype.remove = function () {
+  this.detach();
+  this.task(null);
+  this.controller(null);
+};
+
+ProjectTaskView.prototype.clickedContainer = function (e) {
+  var controller = this.controller().taskSelectionController();
+
+  if (e.which === 1) {
+    if (e.shiftKey) {
+      controller.addToSelection(this);
+    } else if (e.ctrlKey) {
+      controller.toggleSelection(this);
+    } else {
+      this.click()(this.task());
+//      controller.setSelection(this);
+    }
+  }
+};
+
+ProjectTaskView.prototype.controllerSelect = function () {
+  this.$container.toggleClass("selected", true);
+};
+
+ProjectTaskView.prototype.controllerUnselect = function () {
+  this.$container.toggleClass("selected", false);
+};
+
+ProjectTaskView.prototype.handleDragStart = function (e) {
+  var dto = e.originalEvent.dataTransfer;
+  dto.dragEffect = "copy";
+  var textData = this.task().title();
+  if (this.task().notes()) {
+    textData += "\n" + this.task().notes();
+  }
+  dto.setData('Text', textData);
+
+  this.controller().taskSelectionController().selectionOn(this);
+  this.controller().dragController().startDrag(_.invoke(this.controller().taskSelectionController().selection(), "task"));
+};
+
+ProjectTaskView.prototype.handleDragEnd = function (e) {
+  this.controller().dragController().endDrag();
+};
+
+ProjectTaskView.prototype.controllerDragStart = function () {
+  this.$dragDest.toggleClass("active", true);
+  this.$dragDest.css("width", this.$container.outerWidth()+4);
+  this.$dragDest.css("height", this.$container.outerHeight()+4);
+};
+ProjectTaskView.prototype.controllerDragEnd = function () {
+  this.$dragDest.toggleClass("active", false);
+  this.$dragDest.toggleClass("visible", false);
+};
+
+ProjectTaskView.prototype.handleDragOver = function (e) {
+  var dto = e.originalEvent.dataTransfer;
+  if (this.controller().dragController().draggedTasks()) {
+    e.preventDefault();
+    e.stopPropagation();
+    dto.dropEffect = 'copy';
+    this.$dragDest.toggleClass("visible", true);
+    return false;
+  }
+};
+ProjectTaskView.prototype.handleDragLeave = function (e) {
+  var dto = e.originalEvent.dataTransfer;
+  this.$dragDest.toggleClass("visible", false);
+};
+ProjectTaskView.prototype.handleDrop = function (e) {
+  e.stopPropagation();
+  if (this.controller().dragController().draggedTasks()) {
+    var toDrop = this.controller().dragController().draggedTasks().slice(0);
+    toDrop.sort(function (a, b) {
+      return Task.compare(a, b);
+    });
+    _.each(toDrop, function (task) {
+      this.task().addSubtask(task);
+    }, this);
+    this.controller().dragController().endDrag();
+    this.controller().taskSelectionController().clearSelection();
+    return false;
+  }
+};
+
+
 function TaskListView() {
   this._controller = null;
   this._indent = 0;
-  this._showSubtasks = false;
+  this._viewFactory = null;
   this._oldTaskViewFilter = _.noop;
   this._insertionFunction = null;
   this._subtaskViews = [];
@@ -779,7 +1047,7 @@ TaskListView.create = function (controller) {
   return v.controller(controller);
 }
 addAccessors(TaskListView, [
-  "!indent", "!showSubtasks", "!subtaskViews", "!oldTaskViewFilter", "!insertionFunction"
+  "!indent", "!viewFactory", "!subtaskViews", "!oldTaskViewFilter", "!insertionFunction"
 ]);
 
 TaskListView.prototype.controller = function (/*opt*/controller) {
@@ -830,9 +1098,12 @@ TaskListView.prototype.clear = function () {
 };
 
 TaskListView.prototype.updateSubtasks = function (newTasks) {
+  var wantedIds = {};
+  _.each(newTasks, function (t) { wantedIds[t.id()] = true; });
   var old_stvs = {};
   _.each(this.subtaskViews(), function (stv) {
-    if (!stv.task().deleted() && this.oldTaskViewFilter()(stv)) {
+    if (_.has(wantedIds, stv.task().id())
+        || (!stv.task().deleted() && this.oldTaskViewFilter()(stv))) {
       old_stvs[stv.task().id()] = stv;
     } else {
       stv.remove();
@@ -844,8 +1115,8 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
       new_stvs.push(old_stvs[st.id()]);
       delete old_stvs[st.id()];
     } else {
-      var stv = TaskView.create(this.controller(), st);
-      stv.indent(this.indent()).showSubtasks(this.showSubtasks(true));
+      var stv = this.viewFactory()(st);
+      stv.indent(this.indent());
       new_stvs.push(stv);
     }
   }, this);
@@ -856,7 +1127,7 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
     return Task.compare(a.task(), b.task());
   });
 
-  if (_.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) { return stvs[0] === stvs[1]; })) {
+  if (new_stvs.length !== 0 && _.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) { return stvs[0] === stvs[1]; })) {
     console.log("skipping updateSubtasks");
     return this;
   }
@@ -1026,13 +1297,15 @@ InboxView.prototype.remove = function () {
 
 InboxView.prototype.render = function ($dest) {
   this.$el = $('<div class="InboxView">').appendTo($dest);
-  this.$sweep = $('<div>Sweep</div>').appendTo(this.$el);
-  this.$create = $('<div>Create</div>').appendTo(this.$el);
 
   this.$listHolder = $('<div class="listholder">').appendTo(this.$el);
 
   this.taskListView(TaskListView.create(this.controller()));
-  this.taskListView().showSubtasks(true);
+  this.taskListView().viewFactory(_.im(this, function (task) {
+    var tv = TaskView.create(this.controller(), task);
+    tv.showSubtasks(true);
+    return tv;
+  }));
   this.taskListView().oldTaskViewFilter(function (tv) {
     return tv.task().parent() === null;
   }).insertionFunction(_.im(this, function (task, after) {
@@ -1056,13 +1329,6 @@ InboxView.prototype.render = function ($dest) {
   }));
   this.taskListView().render(this.$listHolder);
 
-  var self = this;
-  this.$sweep.on("click", function (e) {
-    self.refresh(true);
-  });
-  this.$create.on("click", function (e) {
-    self.taskDB().createTask();
-  });
 };
 
 InboxView.prototype.refresh = function (/*opt*/sweep) {
@@ -1074,7 +1340,7 @@ InboxView.prototype.refresh = function (/*opt*/sweep) {
 
   this._inboxtasks = _.chain(this.taskDB()._tasks)
     .filter(function (task) {
-      return task.parent() === null;
+      return task.parent() === null && task.status() === null && task.project_type() === null;
     })
     .value();
 
@@ -1082,7 +1348,167 @@ InboxView.prototype.refresh = function (/*opt*/sweep) {
 };
 
 InboxView.prototype.hashArgument = function (arg) {
+  this.refresh(true);
 };
+
+function ProjectsView() {
+  this._taskDB = null;
+  this._controller = null;
+  this._projectListView = null;
+  this._taskListView = null;
+  this._activeProject = null;
+}
+
+addAccessors(ProjectsView, [
+  "!controller", "!projectListView", "!taskListView", "!activeProject"
+]);
+
+ProjectsView.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBCreateHandler) {
+      this.removeTaskDBCreateHandler();
+    }
+    this.removeTaskDBCreateHandler = taskDB.events.on("created updated", _.im(this, "taskCreated"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+
+ProjectsView.prototype.taskCreated = function (task) {
+  if (!this.refreshTimeout) {
+    this.refreshTimeout = window.setTimeout(_.im(this, "refresh"), 0);
+  }
+};
+
+ProjectsView.create = function (controller) {
+  var iv = new this();
+  iv.controller(controller);
+  iv.taskDB(controller.taskDB());
+  return iv;
+};
+
+ProjectsView.prototype.detach = function () {
+  if (this.taskListView()) {
+    this.taskListView().remove();
+  }
+  if (this.projectListView()) {
+    this.projectListView().remove();
+  }
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+
+ProjectsView.prototype.remove = function () {
+  this.detach();
+  if (this.removeTaskDBCreateHandler) {
+    this.removeTaskDBCreateHandler();
+  }
+};
+
+ProjectsView.prototype.render = function ($dest) {
+  this.$el = $('<div class="ProjectsView">').appendTo($dest);
+
+  this.$projectListArea = $('<div class="ProjectsView-plist">').appendTo(this.$el);
+  this.$projectTaskArea = $('<div class="ProjectsView-ptask">').appendTo(this.$el);
+
+  this.projectListView(TaskListView.create(this.controller()));
+  this.projectListView()
+    .viewFactory(_.im(this, function (task) {
+      var tv = ProjectTaskView.create(this.controller(), task);
+      tv.click(_.im(this, function (task) {
+        window.location.hash = "#projects/" + task.id();
+      }));
+      return tv;
+    }))
+    .oldTaskViewFilter(function (tv) {
+      return false;
+    })
+    .insertionFunction(_.im(this, function (task, after) {
+      if (task.parent() === null) {
+        for (var i = 0; i < this._projects.length; i++) {
+          if (this._projects[i] === task) {
+            this._projects.splice(i, 1);
+            break;
+          }
+        }
+      } else {
+        task.detachParent();
+      }
+      if (!task.project_type()) { task.project_type("parallel"); }
+      if (after === void 0) {
+        task.sort_order(firstSortOrder(this._projects));
+      } else {
+        task.sort_order(afterSortOrder(this._projects, after));
+      }
+      this._projects.push(task);
+      correctSortOrder(this._projects);
+    }));
+
+  this.projectListView().render(this.$projectListArea);
+
+  this.taskListView(TaskListView.create(this.controller()));
+  this.taskListView()
+    .viewFactory(_.im(this, function (task) {
+      var tv = TaskView.create(this.controller(), task);
+      tv.showSubtasks(true);
+      return tv;
+    }))
+    .oldTaskViewFilter(_.im(this, function (tv) {
+      return false;
+    }));
+  this.taskListView().render(this.$projectTaskArea);
+};
+
+ProjectsView.prototype.refresh = function (/*opt*/sweep) {
+  this.refreshTimeout = null;
+  
+  if (sweep) {
+    this.taskListView().clear();
+  }
+
+  this._projects = _.chain(this.taskDB()._tasks)
+    .filter(function (task) {
+      return task.parent() === null && task.status() === null && task.project_type() !== null;
+    })
+    .value();
+  this.projectListView().updateSubtasks(this._projects);
+
+  if (this.activeProject()) {
+    this.taskListView().updateSubtasks([this.activeProject()]);
+
+    var activeId = this.activeProject().id();
+    this.$projectListArea.find("[data-project-id]").each(function () {
+      $(this).toggleClass("active", $(this).attr("data-project-id") === activeId);
+    });
+  } else {
+    this.taskListView().updateSubtasks([]);
+  }
+};
+
+ProjectsView.prototype.hashArgument = function (arg) {
+  var oarg = arg;
+  if (!arg && this.activeProject() && this.activeProject().project_type()) {
+    arg = this.activeProject().id();
+  }
+  if (_.has(this.controller().taskDB()._id_to_task, arg)) {
+    this.activeProject(this.controller().taskDB()._id_to_task[arg] || null);
+  }
+  if (!this.activeProject()) {
+    window.location.hash = "projects";
+    return;
+  }
+  if (arg && !oarg) {
+    window.location.hash = "projects/" + arg;
+    return;
+  }
+  this.refresh();
+  console.log(arg);
+};
+
 
 function DragController() {
   this._draggedTasks = null;
@@ -1171,7 +1597,10 @@ function MainLayoutManager($container, controller) {
   this.viewLoaders = {
     "inbox" : function () {
       return InboxView.create(controller);
-    }
+    },
+    "projects" : function () {
+      return ProjectsView.create(controller);
+    },
   };
 
   $(window).on("hashchange", _.im(this, "handleHashChange"));
@@ -1221,6 +1650,14 @@ MainLayoutManager.prototype.loadView = function (viewname) {
   view.render(panel);
 };
 
+MainLayoutManager.prototype.doAction = function (action) {
+  if (action === "create_task") {
+    this.controller.taskDB().createTask();
+  } else if (action === "refresh") {
+    this.activeView.view.refresh(true);
+  }
+};
+
 $(function () {
 
   $(".navitem").on("click", function (e) {
@@ -1228,6 +1665,10 @@ $(function () {
       e.preventDefault();
       window.location.hash = $(e.target).closest('[data-dest]').attr('data-dest');
     }
+  });
+  $(".navitem[accent-color]").each(function () {
+    var $this = $(this);
+    $this.children(".navlabel").css("border-left-color", $this.attr("accent-color"));
   });
 
   var tdb = new TaskDatabase();
@@ -1241,6 +1682,23 @@ $(function () {
 
   t.addSubtask(t2);
 
+  var proj = tdb.createTask().title("Go to the moon").project_type("sequential");
+  proj.addSubtask(tdb.createTask().title("Learn orbital mechanics."));
+  proj.addSubtask(tdb.createTask().title("Build rocket."));
+  proj.addSubtask(tdb.createTask().title("Determine launch window."));
+
+  var stuff = tdb.createTask().title("Personal").project_type("single action");
+  stuff.addSubtask(tdb.createTask().title("Lubricate bike chain"));
+  stuff.addSubtask(tdb.createTask().title("Clean bathroom floor"));
+
+  var substuff = tdb.createTask().title("Build this thing").project_type("parallel");
+  stuff.addSubtask(substuff);
+  substuff.addSubtask(tdb.createTask().title("Database synchronization"));
+
+  var party = tdb.createTask().title("Party").project_type("parallel");
+  party.addSubtask(tdb.createTask().title("Get streamers"));
+  party.addSubtask(tdb.createTask().title("Get drinks"));
+
   var controller = new MainController();
   controller.taskDB(tdb);
   controller.dragController(new DragController());
@@ -1249,6 +1707,14 @@ $(function () {
   window.controller = controller;
 
   var mlm = new MainLayoutManager($('#main'), controller);
+window.mlm= mlm;
+
+  $("#header [data-action]").on("click", function (e) {
+    e.preventDefault();
+    if (e.which === 1) {
+      mlm.doAction($(e.target).closest('[data-action]').attr('data-action'));
+    }
+  });
 
 //  var inboxView = InboxView.create(controller);
 //  inboxView.render($("#main"));

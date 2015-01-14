@@ -12,18 +12,29 @@
   </head>
   <body>
     <div id="header" class="noselect">
-      <div class="header_left">Header left</div>
+      <div class="header_left">
+        <div class="actionitem" data-action="create_task">
+          <div class="batch-icon">&#xf01d;</div>
+          <div class="label">Create task</div>
+        </div>
+        <div class="actionitem" data-action="refresh">
+          <div class="batch-icon">&#xf0b0;</div>
+          <div class="label">Refresh</div>
+        </div>
+      </div>
       <div class="header_right">
         <input id="main_search" type="text" placeholder="Search..."/>
       </div>
     </div>
     <div id="navigation" class="noselect">
-      <div class="navitem" data-dest="inbox"><span class="navlabel">Inbox</span></div>
-      <div class="navitem" data-dest="projects"><span class="navlabel">Projects</span></div>
+      <div class="navitem navitem-noconnect" data-dest="inbox" accent-color="#56f"><span class="navlabel">Inbox <div class="batch-icon">&#xf0bc;</div></span></div>
+      <div class="navitem" data-dest="projects" accent-color="#f67"><span class="navlabel">Projects <div class="batch-icon">&#xf0e4;</div></span></div>
+      <div class="navitem" data-dest="contexts" accent-color="#5e5"><span class="navlabel">Contexts <div class="batch-icon">&#xf151;</div></span></div>
+      <div class="navitem" data-dest="starred" accent-color="#dc3"><span class="navlabel">Starred <div class="batch-icon">&#xf15d;</div></span></div>
       <div class="navitem" data-dest="deferred"><span class="navlabel">Deferred</span></div>
       <div class="navitem" data-dest="review"><span class="navlabel">Review</span></div>
     </div>
     <div id="main"></div>
-    <div id="footer" class="noselect">Footer</div>
+    <div id="footer" class="noselect"></div>
   </body>
 </html>

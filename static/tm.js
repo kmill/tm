@@ -16,7 +16,40 @@ _.mixin({
   }
 });
 
+function Request(command, data) {
+  return new Future(function (callback, error) {
+    $.ajax({
+      url : "/ajax/" + command,
+      type : "POST",
+      dataType : "json",
+      cache : false,
+      timeout: 30000,
+      data : { _xsrf : getCookie("_xsrf"),
+               arguments : JSON.stringify(data) },
+      success : function (d) {
+        if (d.response == "ok") {
+          callback(d);
+        } else if (d.response) {
+          error(d.response);
+        } else {
+          error("bad request");
+        }
+      },
+      error : function (jqXHR, textStatus, message) {
+        error("connection", textStatus, message);
+      }
+    });
+  });
+}
+
+
 /// other stuff
+
+function getCookie(name) {
+  var r = document.cookie.match("\\b" + name + "=([^;]*)\\b");
+  return r ? r[1] : undefined;
+}
+
 var months = {
   0 : "Jan", 1 : "Feb", 2 : "Mar", 3 : "Apr", 4 : "May", 5 : "Jun",
   6 : "Jul", 7 : "Aug", 8 : "Sep", 9 : "Oct", 10 : "Nov", 11 : "Dec"
@@ -234,7 +267,7 @@ function EventSystem(o, names) {
     notify : function (name /*args*/) {
       var args = [o].concat(_.toArray(arguments));
       _.each(get_list(name), function (f) {
-          f(args);
+          f.apply(void 0, args);
       });
     },
     remove : function (handler) {
@@ -305,7 +338,8 @@ function Task() {
   this._title = "";
   this._notes = "";
   this._created = null;
-  this._updated = null;
+  this._updated = null; // task responsible for updating
+  this._version = null; // synchronizer responsible for updating
 
   this._parent = null;
   this._project_type = null;
@@ -323,7 +357,8 @@ function Task() {
   this._recurring = null;
   this._defer = null;
 
-  this.modified = false;
+  // internal
+  this._modified = false;
 
   this._subtasks = [];
 
@@ -374,15 +409,19 @@ Task.prototype.project_type = function (/*opt*/project_type) {
   }
 };
 
-Task.prototype.update = function (prop) {
-  this._updated = _.now();
-  if (!this.modified) {
-    this.modified = true;
+Task.prototype.update = function (/*opt*/updateTime) {
+  if (updateTime === void 0) { updateTime = true; }
+
+  if (updateTime) {
+    this._updated = _.now();
+  }
+  if (!this._modified) {
+    this._modified = true;
     registerUpdate(this);
   }
 };
 Task.prototype.doUpdate = function () {
-  this.modified = false;
+  this._modified = false;
   this.events.notify("updated");
   if (this.parent()) {
     this.parent().events.notify("updated");
@@ -393,6 +432,8 @@ Task.compare = function (a, b) {
   var soa = a.sort_order(), sob = b.sort_order();
   if (soa < sob) return -1;
   else if (soa > sob) return 1;
+  else if (a.title() < b.title()) return -1;
+  else if (a.title() > b.title()) return 1;
   else return 0;
 };
 
@@ -410,7 +451,7 @@ Task.prototype.removeSubtask = function (task) {
       break;
     }
   }
-  this.update();
+  this.update(false);
   return this;
 };
 Task.prototype.addSubtask = function (task, /*opt*/sort_order) {
@@ -435,7 +476,7 @@ Task.prototype.addSubtask = function (task, /*opt*/sort_order) {
   this._subtasks.push(task);
 
   correctSortOrder(this._subtasks);
-  this.update();
+  this.update(false);
 
   return this;
 };
@@ -446,6 +487,64 @@ Task.prototype.activeSubtasks = function () {
 
 Task.prototype.active = function () {
   return !this.deleted() && this.status() !== "done";
+};
+
+Task.prototype.toDict = function () {
+  var o = {
+    id : this.id(),
+    title : this.title(),
+    notes : this.notes(),
+    created : this.created(),
+//    version : this.version(),
+
+    parent : this.parent() ? this.parent().id() : null,
+    project_type : this.project_type(),
+    sort_order : this.sort_order(),
+    starred : this.starred(),
+    status : this.status(),
+    status_changed : this.status_changed()
+  };
+
+  return o;
+};
+Task.prototype.updateFromDict = function (o, taskdb) {
+  if (this.id() !== o.id) {
+    throw new Error("incorrect id");
+  }
+  if (_.has(o, 'title') && this.title() !== o.title) {
+    this.title(o.title);
+  }
+  if (_.has(o, 'notes') && this.notes() !== o.notes) {
+    this.notes(o.notes);
+  }
+  if (_.has(o, 'created') && this.created() !== o.created) {
+    this.created(o.created);
+  }
+  if (_.has(o, 'version') && this.version() !== o.version) {
+    this.version(o.version);
+  }
+  if (_.has(o, 'parent')) {
+    if (o.parent && (!this.parent() || o.parent !== this.parent().id())) {
+      taskdb.ensureTask(o.parent).addSubtask(this);
+    } else if (!o.parent && this.parent()) {
+      this.detachParent();
+    }
+  }
+  if (_.has(o, 'project_type') && this.project_type() !== o.project_type) {
+    this.project_type(o.project_type);
+  }
+  if (_.has(o, 'sort_order') && this.sort_order() !== o.sort_order) {
+    this.sort_order(o.sort_order);
+  }
+  if (_.has(o, 'starred') && this.starred() !== o.starred) {
+    this.starred(o.starred);
+  }
+  if (_.has(o, 'status') && this.status() !== o.status) {
+    this.status(o.status);
+  }
+  if (_.has(o, 'status_changed') && this.status_changed() !== o.status_changed) {
+    this.status_changed(o.status_changed);
+  }
 };
 
 function firstSortOrder(tasks) {
@@ -1634,6 +1733,19 @@ TaskDatabase.prototype.createTask = function () {
   t.events.on("updated", _.im(this, "handleUpdated"));
   return t;
 };
+TaskDatabase.prototype.ensureTask = function (id) {
+  if (_.has(this._id_to_task, id)) {
+    return this._id_to_task[id];
+  } else {
+    var t = new Task();
+    t.id(id).created(_.now()).sort_order(_.now());
+    this._tasks.push(t);
+    this._id_to_task[t.id()] = t;
+    this.events.notify("created", t);
+    t.events.on("updated", _.im(this, "handleUpdated"));
+    return t;
+  }  
+};
 
 TaskDatabase.prototype.handleUpdated = function (task) {
   this.events.notify("updated", task);
@@ -1653,6 +1765,115 @@ TaskDatabase.prototype.getInbox = function () {
       return !task.deleted() && task.parent() === null && task.status() === null && task.project_type() === null;
     })
     .value();
+};
+
+function DatabaseSynchronizer() {
+  this._taskDB = null;
+  this._changedIds = {};
+  this._backingObjects = {};
+  this._toSend = {};
+  this._nextSince = -1;
+  this.syncTimeout = null;
+  this.sendTimeout = null;
+  this._sendDelay = 1000 * 1;
+  this._receiveDelay = 1000 * 20;
+}
+addAccessors(DatabaseSynchronizer, [
+  "!sendDelay", "!nextSince", "!receiveDelay"
+]);
+DatabaseSynchronizer.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBHandler) {
+      this.removeTaskDBHandler();
+    }
+    this.removeTaskDBHandler = taskDB.events.on("created updated", _.im(this, "taskChanged"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+DatabaseSynchronizer.prototype.taskChanged = function (taskDB, event, task) {
+  this._changedIds[task.id()] = task;
+  if (!this.syncTimeout) {
+    this.syncTimeout = window.setTimeout(_.im(this, 'deferSynchronize'), 0);
+  }
+};
+DatabaseSynchronizer.prototype.deferSynchronize = function () {
+  if (this.syncTimeout) {
+    window.clearTimeout(this.syncTimeout);
+    this.syncTimeout = null;
+  }
+  var changed = false;
+  _.each(this._changedIds, function (task) {
+    var o = task.toDict();
+    if (!_.has(this._backingObjects, task.id())
+        || !_.isEqual(o, this._backingObjects[task.id()])) {
+      task.version(task.updated());
+      this._backingObjects[o.id] = o;
+      this._toSend[o.id] = true;
+      changed = true;
+    }
+  }, this);
+  this._changedIds = {};
+
+  if (changed && !this.sendTimeout) {
+    this.sendTimeout = window.setTimeout(_.im(this, 'deferSend'), this.sendDelay());
+  }
+};
+DatabaseSynchronizer.prototype.deferSend = function () {
+  if (this.sendTimeout) {
+    window.clearTimeout(this.sendTimeout);
+    this.sendTimeout = null;
+  }
+  var senddata = [];
+  _.each(this._toSend, function (b, id) {
+    // have to keep version out of backingObject so that _.isEqual works
+    var o = _.clone(this._backingObjects[id]);
+    o.version = this.taskDB()._id_to_task[id].version();
+    senddata.push(o);
+  }, this);
+  console.log("Saving", _.pluck(senddata, "id"));
+  console.log(JSON.stringify(senddata));
+  Request("save", {tasks : senddata})
+    .then(_.im(this, function () {
+      console.log("heard from server");
+      this._toSend = {};
+    }), _.im(this, function (message) {
+      console.error(message);
+    }));
+};
+DatabaseSynchronizer.prototype.receive = function () {
+  if (this._receiveTimeout) {
+    window.clearTimeout(this._receiveTimeout);
+    this._receiveTimeout = null;
+  }
+  Request("tasks", { since : this.nextSince() })
+    .then(_.im(this, function (data) {
+        console.log("Received tasks");
+      _.each(data.tasks, function (taskstring) {
+        console.log(taskstring);
+        var tdict = JSON.parse(taskstring);
+        var t = this.taskDB().ensureTask(tdict.id);
+        if (t.version())
+        console.log(t.version(), tdict.version);
+        if (!t.version() || (t.version() && t.version() < tdict.version)) {
+          t.updateFromDict(tdict, this.taskDB());
+          delete tdict.version;
+          this._backingObjects[tdict.id] = tdict;
+        }
+      }, this);
+      this.nextSince(data.next_since);
+
+      this._receiveTimeout = window.setTimeout(_.im(this, "receive"), this.receiveDelay());
+    }), _.im(this, function (message) {
+      console.error(message);
+      this._receiveTimeout = window.setTimeout(_.im(this, "receive"), this.receiveDelay());
+    }))
+    .failure(function () {
+      this._receiveTimeout = window.setTimeout(_.im(this, "receive"), this.receiveDelay());
+      console.error(arguments);
+    });
 };
 
 function InboxView() {
@@ -2022,6 +2243,7 @@ function ViewOptionsController() {
 
 function MainController() {
   this._taskDB = null;
+  this._synchronizer = null;
   this._dragController = null;
   this._taskSelectionController = null;
   this._projectSelector = null;
@@ -2029,7 +2251,7 @@ function MainController() {
   this._globalKeyHandler = null;
 }
 addAccessors(MainController, [
-  "!taskDB", "!dragController", "!taskSelectionController",
+  "!taskDB", "!synchronizer", "!dragController", "!taskSelectionController",
   "!projectSelector", "!taskSettingsSelector", "!globalKeyHandler"
 ]);
 
@@ -2101,8 +2323,29 @@ MainLayoutManager.prototype.doAction = function (action) {
   if (action === "create_task") {
     this.controller.taskDB().createTask();
   } else if (action === "refresh") {
+    this.controller.synchronizer().receive();
     this.activeView.view.refresh(true);
   }
+};
+
+function UserInfo() {
+  this.contextMenu = null;
+}
+UserInfo.prototype.render = function ($userinfo) {
+  this.$userinfo = $userinfo;
+  this.contextMenu = new ContextMenu();
+  this.contextMenu.render();
+  var $ul = $('<ul>').appendTo(this.contextMenu.$el);
+  var $signOut = $('<li>Sign out</li>').appendTo($ul);
+
+  $signOut.on("click", _.im(this, function (e) {
+    window.location = "/signout";
+  }));
+  
+  this.$userinfo.on("click contextmenu", _.im(this, function (e) {
+    e.preventDefault();
+    this.contextMenu.activate(this.$userinfo, "vertical");
+  }));
 };
 
 $(function () {
@@ -2118,36 +2361,18 @@ $(function () {
     $this.children(".navlabel").css("border-left-color", $this.attr("accent-color"));
   });
 
+  new UserInfo().render($('.UserInfo'));
+
   var tdb = new TaskDatabase();
+  var synchronizer = new DatabaseSynchronizer();
+  synchronizer.taskDB(tdb);
+  synchronizer.receive();
 
   window.tdb = tdb;
 
-
-  var t = tdb.createTask().title("A task").notes("This is the note.");
-  var t2 = tdb.createTask().title("Another task");
-  var t3 = tdb.createTask().title("Even another task");
-
-  t.addSubtask(t2);
-
-  var proj = tdb.createTask().title("Go to the moon").project_type("sequential");
-  proj.addSubtask(tdb.createTask().title("Learn orbital mechanics."));
-  proj.addSubtask(tdb.createTask().title("Build rocket."));
-  proj.addSubtask(tdb.createTask().title("Determine launch window."));
-
-  var stuff = tdb.createTask().title("Personal").project_type("single action");
-  stuff.addSubtask(tdb.createTask().title("Lubricate bike chain"));
-  stuff.addSubtask(tdb.createTask().title("Clean bathroom floor"));
-
-  var substuff = tdb.createTask().title("Build this thing").project_type("parallel");
-  stuff.addSubtask(substuff);
-  substuff.addSubtask(tdb.createTask().title("Database synchronization"));
-
-  var party = tdb.createTask().title("Party").project_type("parallel");
-  party.addSubtask(tdb.createTask().title("Get streamers"));
-  party.addSubtask(tdb.createTask().title("Get drinks"));
-
   var controller = new MainController();
   controller.taskDB(tdb);
+  controller.synchronizer(synchronizer);
   controller.dragController(new DragController());
   controller.taskSelectionController(new TaskSelectionController());
 
@@ -2166,10 +2391,6 @@ $(function () {
     };
   });
 
-  for (var i = 0; i < 50; i++) {
-    tdb.createTask().title("This is task" + i);
-    tdb.createTask().title("Project" + i).project_type("parallel");
-  }
 
   window.controller = controller;
 

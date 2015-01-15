@@ -55,6 +55,14 @@ html, body {
     bottom: 8px; right: 8px; top: 8px;
 }
 
+.UserInfo {
+    display: inline-block;
+    cursor: default;
+}
+.UserInfo:hover {
+    color: #888;
+}
+
 #main_search {
     border: none;
     padding: 0.4em 0.6em;

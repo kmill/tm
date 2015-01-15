@@ -199,6 +199,28 @@ html, body {
     overflow: hidden;
 }
 
+.ProjectsView-createTask {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+
+    display: inline-block;
+    font-size: 11px;
+    margin-top: 12px;
+    margin-left: 36px;
+    color: #999;
+}
+.ProjectsView-createTask:hover {
+    color: #555;
+}
+.ProjectsView-createTask:active {
+    color: #888;
+}
+
 .StatusLine {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -294,6 +316,14 @@ html, body {
 
 }
 
+.TaskView-main .transient {
+    visibility: hidden;
+}
+.TaskView-container:hover .TaskView-main .transient,
+.TaskView-container.selected .TaskView-main .transient {
+    visibility: visible;
+}
+
 .TaskView-secondArea {
     padding: 0 4px;
 }
@@ -324,6 +354,9 @@ html, body {
 .TaskView-button:not(.unbutton):hover {
     color: #555;
 }
+.TaskView-button:not(.unbutton):active {
+    color: #888;
+}
 .TaskView-button.unbutton {
     color: #666;
 }
@@ -351,6 +384,7 @@ html, body {
     color: #777;
 /*    border: 1px solid #999;*/
 /*    border-width: 0 0 0 1px; */
+    max-width: 600px;
 }
 
 .TaskView-notes pre.CodeMirror-placeholder {
@@ -388,8 +422,9 @@ html, body {
     text-overflow: ellipsis;
     background: transparent;
     padding: 0 4px;
+    cursor: default;
 }
-.ProjectTaskView-title.noname:after {
+.ProjectTaskView-title.noname::after {
     color: #999;
     content: 'Untitled';
 }
@@ -531,6 +566,17 @@ html, body {
     margin: 2px 4px 1px 4px;
 }
 
+.context-menu li.submenu:after {
+    content: '\f105';
+    float: right;
+    font: normal normal normal 14px/1 FontAwesome;
+    text-rendering: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    display: inline-block;
+    margin-right: -6px;
+}
+
 .context-menu-cloak {
     position: fixed;
     top: 0; right: 0; bottom: 0; left: 0;
@@ -551,7 +597,100 @@ li:hover .ProjectSelector-projecticon {
 .ProjectSelector-indent {
     display: inline-block;
 }
-.ProjectSelector-projectname.noname:after {
+.ProjectSelector-projectname.noname::after {
     color: #999;
     content: 'Untitled';
+}
+
+.FancyCheckbox {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+    -webkit-user-drag: none;
+    user-drag: none;
+
+    display: inline-block;
+
+
+    background: #fbfbfb;
+    background-image: linear-gradient(to bottom, #fbfbfb, #ededed);
+    border-radius: 0.2em;
+    box-shadow: 0 0 0 1px #ccc;
+    font-size: 20px;
+    line-height: 100%;
+    outline: none;
+    position: relative;
+    margin: 1px 1px;
+}
+
+.FancyCheckbox:hover {
+    background-image: linear-gradient(to bottom, #ebebeb, #dddddd);
+}
+.FancyCheckbox:active {
+    background-image: linear-gradient(to bottom, #ebebfb, #dddded);
+}
+
+.FancyCheckbox::before {
+/*    visibility: hidden;*/
+    color: #eee;
+    text-shadow: 0 1px 0 #dddddd, 0 2px 0 #ffffff, 0 -1px 0 #dddddd;
+}
+.FancyCheckbox.checked::before {
+    visibility: visible;
+    color: #555;
+    text-shadow: 0 1px 0 #dddddd, 0 2px 0 #ffffff, 0 -1px 0 #fff;
+}
+.FancyCheckbox:active::before {
+    color: #aaa;
+}
+
+.TaskStar {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+    -webkit-user-drag: none;
+    user-drag: none;
+
+    display: inline-block;
+
+
+    font-size: 20px;
+    line-height: 100%;
+    outline: none;
+    position: relative;
+    margin: 1px 1px;
+}
+
+.TaskStar::before {
+    color: #eee;
+    text-shadow: 0 1px 0 #dddddd, 0 2px 0 #ffffff, 0 -1px 0 #dddddd;
+}
+.TaskStar.checked::before {
+    visibility: visible;
+    color: #ffd700;
+/*    text-shadow: 0px 1px 1px #ddd, 0 0 1px #eee8aa;*/
+    text-shadow: 0 1px 0 #dddddd, 0 2px 0 #ffffff, 0 -1px 0 #d4af37;
+}
+.TaskStar:hover::before {
+    color: #eee8aa;
+}
+.TaskStar.checked:hover::before {
+    color: #eec600;
+    color: #ffe810;
+}
+.TaskStar.checked:active::before, .TaskStar:active::before {
+    color: #d4af37;
+}
+
+.em-spacer {
+    display: inline-block;
+    width: 1em;
 }

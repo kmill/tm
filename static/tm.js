@@ -512,34 +512,71 @@ addAccessors(WorkHistoryItem, [
   "!start", "!end"
 ]);
 
-// Views
+// Widgets
 
-function ProjectSelector() {
-  this._controller = null;
-  this._active = false;
-  this._task = null;
+function FancyCheckbox() {
+  this._checked = false;
+  new EventSystem(this, "change");
+  this._symbol = "fa-check";
+  this._checkboxClass = "FancyCheckbox";
+  this.on = this.events.on;
 }
-ProjectSelector.nextNamespaceId = 0;
-addAccessors(ProjectSelector, [
-  "!controller", "!task"
-]);
-ProjectSelector.create = function (controller) {
-  var ps = new ProjectSelector();
-  ps.controller(controller);
-  return ps;
+addAccessors(FancyCheckbox, [ "!symbol", "!checkboxClass" ]);
+FancyCheckbox.create = function () {
+  return new FancyCheckbox();
+};
+FancyCheckbox.prototype.render = function ($dest) {
+  this.$el = $('<div>').appendTo($dest);
+  this.$el
+    .addClass(this.checkboxClass())
+    .addClass("fa")
+    .addClass(this.symbol());
+
+  this.$el.on("click", _.im(this, "click"));
+  return this;
+};
+FancyCheckbox.prototype.click = function (e) {
+  if (e.which === 1) {
+    e.stopPropagation();
+    this.toggle();
+  }
+};
+FancyCheckbox.prototype.toggle = function () {
+  this._checked = !this._checked;
+  this.update();
+};
+FancyCheckbox.prototype.check = function (/*opt*/check) {
+  if (arguments.length > 0) {
+    this._checked = !!check;
+    this.update();
+    return this;
+  } else {
+    return this._checked;
+  }
+};
+FancyCheckbox.prototype.update = function () {
+  this.$el.toggleClass("checked", this._checked);
+  this.events.notify("change");
 };
 
-ProjectSelector.prototype.render = function ($dest) {
+
+// Views
+
+function ContextMenu() {
+  this.$cloak = null;
+  this.$el = null;
+  this._closeCallback = null;
+}
+ContextMenu.prototype.render = function () {
+  var $dest = $("body");
   this.$cloak = $('<div class="context-menu-cloak">').appendTo($dest);
   this.$el = $('<div class="context-menu">').appendTo($dest);
-  this.$projectList = $('<ul>').appendTo(this.$el);
 
   this.$cloak.on("click contextmenu", _.im(this, function (e) {
     e.preventDefault();
     e.stopPropagation();
     this.deactivate();
   }));
-
   this.$el.on("click", _.im(this, function (e) {
     e.preventDefault();
     e.stopPropagation();
@@ -549,56 +586,96 @@ ProjectSelector.prototype.render = function ($dest) {
     e.preventDefault();
     this.$el.click();
   }));
+};
+ContextMenu.prototype.activate = function ($target, position, /*opt*/closeCallback) {
+  this._closeCallback = closeCallback;
+
+  this.$cloak.show();
+  this.$el.show();
+  this.$el.css("max-height", "none");
+  this.$el.css("width", "");
+
+  var myheight = this.$el.outerHeight();
+  var toffset, twidth, theight;
+
+  if (position === "mouse") {
+    toffset = {top : $target.y, left : $target.x };
+    twidth = 0;
+    theight = 0;
+    position = "vertical";
+  } else {
+    $target = $($target);
+    toffset = $target.offset();
+    twidth = $target.outerWidth();
+    theight = $target.outerHeight();
+  }
+
+  if (position === "vertical") {
+    
+    if (toffset.top + theight + myheight < $(window).height()) {
+      // below full
+      this.$el.css("top", (toffset.top + theight) + "px");
+    } else if (myheight < toffset.top) {
+      // above full
+      this.$el.css("top", (toffset.top - myheight) + "px");
+    } else if (toffset.top < $(window).height() - toffset.top - theight) {
+      // below partial
+      this.$el.css("top", (toffset.top + theight) + "px");
+      this.$el.css("max-height", ($(window).height() - toffset.top - theight) + "px");
+      this.$el.css("width", this.$el.width() + 20);
+    } else {
+      // above partial
+      this.$el.css("top", "0px");
+      this.$el.css("max-height", (toffset.top) + "px");
+      this.$el.css("width", this.$el.width() + 20);
+    }
+    // should it be to the right or the left?
+    if (toffset.left + this.$el.width() < $(window).width()) {
+      this.$el.css("left", (toffset.left) + "px");
+    } else {
+      this.$el.css("left", (toffset.left + twidth - this.$el.width()) + "px");
+    }
+  } else {
+    throw new Error("Unknown position");
+  }
+};
+ContextMenu.prototype.deactivate = function () {
+  this.$cloak.hide();
+  this.$el.hide();
+  if (this._closeCallback) {
+    this._closeCallback();
+  }
+};
+
+
+function ProjectSelector() {
+  this._controller = null;
+  this._active = false;
+  this._task = null;
+}
+addAccessors(ProjectSelector, [
+  "!controller", "!task"
+]);
+ProjectSelector.create = function (controller) {
+  var ps = new ProjectSelector();
+  ps.controller(controller);
+  return ps;
+};
+
+ProjectSelector.prototype.render = function () {
+  this.contextMenu = new ContextMenu();
+  this.contextMenu.render();
+
+  this.$projectList = $('<ul>').appendTo(this.contextMenu.$el);
 
   return this;
 };
 
 ProjectSelector.prototype.activate = function (task, $target, /*opt*/closeCallback) {
-  this._closeCallback = closeCallback || _.noop;
   this.task(task);
-  this._active = true;
-  $target = $($target);
-  this.$cloak.show();
-  this.$el.show();
 
   this.fillProjects();
-  this.$el.css("max-height", "none");
-  this.$el.css("width", "");
-
-  var toffset = $target.offset(),
-      twidth = $target.outerWidth(),
-      theight = $target.outerHeight(),
-      myheight = this.$el.outerHeight();
-
-  if (toffset.top + theight + myheight < $(window).height()) {
-    // below full
-    this.$el.css("top", (toffset.top + theight) + "px");
-  } else if (myheight < toffset.top) {
-    // above full
-    this.$el.css("top", (toffset.top - myheight) + "px");
-  } else if (toffset.top < $(window).height() - toffset.top - theight) {
-    // below partial
-    this.$el.css("top", (toffset.top + theight) + "px");
-    this.$el.css("max-height", ($(window).height() - toffset.top - theight) + "px");
-    this.$el.css("width", this.$el.width() + 20);
-  } else {
-    // above partial
-    this.$el.css("top", "0px");
-    this.$el.css("max-height", (toffset.top) + "px");
-    this.$el.css("width", this.$el.width() + 20);
-  }
-  // should it be to the right or the left?
-  if (toffset.left + this.$el.width() < $(window).width()) {
-    this.$el.css("left", (toffset.left) + "px");
-  } else {
-    this.$el.css("left", (toffset.left + twidth - this.$el.width()) + "px");
-  }
-};
-
-ProjectSelector.prototype.deactivate = function () {
-  this.$cloak.hide();
-  this.$el.hide();
-  this._closeCallback();
+  this.contextMenu.activate($target, "vertical", closeCallback);
 };
 
 ProjectSelector.prototype.fillProjects = function () {
@@ -642,6 +719,73 @@ ProjectSelector.prototype.fillProjects = function () {
   _.each(projects, function (project) {
     addProject.call(this, project, 0);
   }, this);
+};
+
+function TaskSettingsSelector() {
+  this._controller = null;
+  this._active = false;
+  this._task = null;
+}
+addAccessors(TaskSettingsSelector, [
+  "!controller", "!task"
+]);
+TaskSettingsSelector.create = function (controller) {
+  var tss = new TaskSettingsSelector();
+  tss.controller(controller);
+  return tss;
+};
+TaskSettingsSelector.prototype.render = function () {
+  this.contextMenu = new ContextMenu();
+  this.contextMenu.render();
+  this.$list = $('<ul>').appendTo(this.contextMenu.$el);
+  return this;
+};
+TaskSettingsSelector.prototype.activate = function (mouse, task, /*opt*/closeCallback) {
+  this.task(task);
+  this.fill();
+  this.contextMenu.activate(mouse, "mouse", closeCallback);
+};
+TaskSettingsSelector.prototype.fill = function () {
+  this.$list.empty();
+
+  var nextStatusState = this.task().status() === "done" ? null : "done";
+  var $complete = $('<li>').appendTo(this.$list);
+  $complete.text(nextStatusState === "done" ? "Mark completed" : "Unmark completed");
+
+  $complete.on("click", _.im(this, function (e) {
+    this.task().status(nextStatusState);
+  }));
+
+  var nextStarState = !this.task().starred();
+  var $star = $('<li>').appendTo(this.$list);
+  $star.text(nextStarState ? "Star" : "Unstar");
+
+  $star.on("click", _.im(this, function (e) {
+    this.task().starred(nextStarState);
+  }));
+
+  var $projectType = $('<li class="submenu">').appendTo(this.$list);
+  $projectType.text("Project type");
+  
+
+  var $createSubtask = $('<li>').appendTo(this.$list);
+  $createSubtask.text("Create subtask");
+  $createSubtask.on("click", _.im(this, function (e) {
+    var task = this.controller().taskDB().createTask();
+    this.controller().taskSelectionController().createdTask(task);
+    this.task().addSubtask(task);
+  }));
+
+  $('<li class="context-menu-divider">').appendTo(this.$list);
+
+  var nextDeleteState = !this.task().deleted();
+  var $delete = $('<li>').appendTo(this.$list);
+  $delete.text(nextDeleteState ? "Delete" : "Restore");
+
+  $delete.on("click", _.im(this, function (e) {
+    this.task().deleted(nextDeleteState);
+  }));
+
 };
 
 function TaskView() {
@@ -725,6 +869,7 @@ TaskView.prototype.makeNotesArea = function (initial) {
     value : initial,
     mode : "text",
     placeholder : "Notes...",
+    lineWrapping: true,
     viewportMargin: Infinity,
     extraKeys : {
       Tab : false,
@@ -755,7 +900,14 @@ TaskView.prototype.render = function ($dest) {
 
   this.$title = $('<input class="TaskView-title" type="text" placeholder="Untitled">').appendTo(this.$titleArea);
   this.$title.val(this.task().title());
-  this.$check = $('<input type="checkbox" tabindex="-1">').appendTo(this.$checkArea);
+  this.starcheck = FancyCheckbox.create()
+    .symbol("fa-star")
+    .checkboxClass("TaskStar")
+    .render(this.$checkArea);
+  this.$checkArea.append($('<div class="em-spacer">'));
+  this.starred(this.task().starred());
+  this.check = FancyCheckbox.create().render(this.$checkArea);
+//  this.$check = $('<input type="checkbox" tabindex="-1">').appendTo(this.$checkArea);
   this.status(this.task().status());
 
   var $secondArea = $('<div class="TaskView-secondArea">').appendTo(this.$titleArea);
@@ -773,7 +925,10 @@ TaskView.prototype.render = function ($dest) {
   $secondArea.append('<div class="TaskView-button-spacer">');
   
   this.$projectButton = $('<div class="TaskView-button transient" title="Project">').appendTo($secondArea);
-  this.$projectButton.on("click", _.im(this, function (e) {
+  this.$projectButton.on("click contextmenu", _.im(this, function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.controller().taskSelectionController().setSelection(this);
     this.$projectButton.addClass("active");
     this.controller().projectSelector().activate(this.task(), this.$projectButton,
                                                  _.im(this, function () {
@@ -809,12 +964,14 @@ TaskView.prototype.render = function ($dest) {
   }
 
   this.$container.on("click", _.im(this, "clickedContainer"));
+  this.$container.on("contextmenu", _.im(this, "contextMenu"));
 
   this.$title.on("change", _.im(this, "titleChanged"));
   this.$title.on("focus", _.im(this, "gainFocus"));
   this.$title.on("blur", _.im(this, "loseFocus"));
 
-  this.$check.on("change", _.im(this, "statusChanged"));
+  this.starcheck.on("change", _.im(this, "starredChanged"));
+  this.check.on("change", _.im(this, "statusChanged"));
 
   this.$container.on("dragstart", _.im(this, "handleDragStart"));
   this.$container.on("dragend", _.im(this, "handleDragEnd"));
@@ -822,7 +979,12 @@ TaskView.prototype.render = function ($dest) {
   this.$dragDest.on("dragleave", _.im(this, "handleDragLeave"));
   this.$dragDest.on("drop", _.im(this, "handleDrop"));
 
-  this.controllerUnselect();
+  if (this.controller().taskSelectionController().isCreatedTask(this.task())) {
+    this.$title.focus();
+//    this.controller().taskSelectionController().setSelection(this);
+  } else {
+    this.controllerUnselect();
+  }
 };
 
 TaskView.prototype.titleChanged = function () {
@@ -846,6 +1008,13 @@ TaskView.prototype.statusChanged = function () {
   }
 };
 
+TaskView.prototype.starredChanged = function () {
+  var newStatus = this.starred();
+  if (newStatus !== this.task().starred()) {
+    this.task().starred(newStatus);
+  }
+};
+
 TaskView.prototype.clickedContainer = function (e) {
   var controller = this.controller().taskSelectionController();
 
@@ -860,15 +1029,40 @@ TaskView.prototype.clickedContainer = function (e) {
   }
 };
 
+TaskView.prototype.contextMenu = function (e) {
+  this.controller().taskSelectionController().setSelection(this);
+  if (this.$container.attr("draggable") !== "true") return;
+//  if (e.target.tag === "INPUT" !== this.$container[0]) return;
+  e.preventDefault();
+  e.stopPropagation();
+  this.controller().taskSettingsSelector().activate(
+    {x : e.clientX, y : e.clientY},
+    this.task(),
+    _.noop
+  );
+};
+
 TaskView.prototype.gainFocus = function () {
   this.$container.attr("draggable", "false");
   this.controller().taskSelectionController().setSelection(this);
   if (this.$el[0].scrollIntoViewIfNeeded) {
     this.$el[0].scrollIntoViewIfNeeded();
   }
+  this.controller().globalKeyHandler().pushKeyMap({
+    'S-<return>' : _.im(this, function (e) {
+      var task = this.controller().taskDB().createTask();
+      this.controller().taskSelectionController().createdTask(task);
+      if (this.task().project_type() || !this.task().parent()) {
+        this.task().addSubtask(task);
+      } else {
+        this.task().parent().addSubtask(task);
+      }
+    })
+  });
 };
 TaskView.prototype.loseFocus = function () {
   this.$container.attr("draggable", "true");
+  this.controller().globalKeyHandler().popKeyMap();
 };
 
 TaskView.prototype.focus = function () {
@@ -888,15 +1082,12 @@ function icon_for_project_type(project_type) {
   switch (project_type) {
   case "single action" :
     return ($('<div class="batch-icon">&#xf0e4;</div>'));
-    break;
   case "parallel" :
     return ($('<div class="batch-icon">&#xf11b;</div>'));
-    break;
   case "sequential" :
     return ($('<div class="batch-icon">&#xf0a7;</div>'));
-    break;
   default:
-    break;
+    return void 0;
   }
 
 }
@@ -905,6 +1096,7 @@ TaskView.prototype.updateProjectProperties = function () {
   this.$title.toggleClass("project", null !== this.task().project_type());
   this.$checkArea.toggle(null === this.task().project_type());
   this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
+//  this.$iconArea.toggleClass("transient", !this.task().project_type());
 
   if (this.task().parent()) {
     this.$projectButton.text(this.task().parent().title());
@@ -929,6 +1121,11 @@ TaskView.prototype.taskUpdated = function () {
     this.status(this.task().status());
   }
 
+  // starred
+  if (this.task().starred() !== this.starred()) {
+    this.starred(this.task().starred());
+  }
+
   // note
   if (this.task().notes() && !this.notes) {
     this.makeNotesArea(this.task().notes());
@@ -950,13 +1147,25 @@ TaskView.prototype.taskUpdated = function () {
 
 TaskView.prototype.status = function (/*opt*/status) {
   if (arguments.length > 0) {
-    this.$check.prop("checked", status === "done");
+//    this.$check.prop("checked", status === "done");
+    this.check.check(status === "done");
     return this;
   } else {
-    return this.$check.prop("checked") ? "done" : null;
+//    return this.$check.prop("checked") ? "done" : null;
+    return this.check.check() ? "done" : null;
   }
 };
 
+TaskView.prototype.starred = function (/*opt*/starred) {
+  if (arguments.length > 0) {
+//    this.$check.prop("checked", status === "done");
+    this.starcheck.check(starred);
+    return this;
+  } else {
+//    return this.$check.prop("checked") ? "done" : null;
+    return this.starcheck.check();
+  }
+};
 
 TaskView.prototype.handleDragStart = function (e) {
   var dto = e.originalEvent.dataTransfer;
@@ -1433,7 +1642,15 @@ TaskDatabase.prototype.handleUpdated = function (task) {
 TaskDatabase.prototype.getProjects = function () {
   return _.chain(this._tasks)
     .filter(function (task) {
-      return task.parent() === null && task.status() === null && task.project_type() !== null;
+      return !task.deleted() && task.parent() === null && task.status() === null && task.project_type() !== null;
+    })
+    .value();
+};
+
+TaskDatabase.prototype.getInbox = function () {
+  return _.chain(this._tasks)
+    .filter(function (task) {
+      return !task.deleted() && task.parent() === null && task.status() === null && task.project_type() === null;
     })
     .value();
 };
@@ -1536,11 +1753,8 @@ InboxView.prototype.refresh = function (/*opt*/sweep) {
     this.taskListView().clear();
   }
 
-  this._inboxtasks = _.chain(this.taskDB()._tasks)
-    .filter(function (task) {
-      return task.parent() === null && task.status() === null && task.project_type() === null;
-    })
-    .value();
+  this._inboxtasks = this.controller().taskDB().getInbox();
+  correctSortOrder(this._inboxtasks);
 
   this.$status.text(pluralize(this._inboxtasks.length, "task"));
 
@@ -1662,7 +1876,19 @@ ProjectsView.prototype.render = function ($dest) {
     .oldTaskViewFilter(_.im(this, function (tv) {
       return false;
     }));
-  this.taskListView().render($('<div class="ProjectsView-listholder">').appendTo(this.$projectTaskArea));
+  var $taskListHolder = $('<div class="ProjectsView-listholder">').appendTo(this.$projectTaskArea);
+  this.taskListView().render($taskListHolder);
+  this.$createTask = $('<div class="ProjectsView-createTask">+ task</div>').appendTo($taskListHolder);
+  this.$createTask.hide();
+
+  this.$createTask.on("click", _.im(this, function (e) {
+    e.preventDefault();
+    if (this.activeProject()) {
+      var task = this.controller().taskDB().createTask();
+      this.controller().taskSelectionController().createdTask(task);
+      this.activeProject().addSubtask(task);
+    }
+  }));
 };
 
 ProjectsView.prototype.refresh = function (/*opt*/sweep) {
@@ -1673,6 +1899,7 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
   }
 
   this._projects = this.taskDB().getProjects();
+  correctSortOrder(this._projects);
   this.projectListView().updateSubtasks(this._projects);
 
   if (this.activeProject()) {
@@ -1684,9 +1911,11 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
     });
 
     this.$status.text(pluralize(0, "task"));
+    this.$createTask.show();
   } else {
     this.taskListView().updateSubtasks([]);
     this.$status.text("");
+    this.$createTask.hide();
   }
 };
 
@@ -1730,7 +1959,20 @@ DragController.prototype.endDrag = function () {
 
 function TaskSelectionController() {
   this._selectedTasks = [];
+  this._createdTask = null;
 }
+addAccessors(TaskSelectionController, [
+  "!createdTask"
+]);
+TaskSelectionController.prototype.isCreatedTask = function (task) {
+  if (task && task === this.createdTask()) {
+    this.createdTask(null);
+    return true;
+  } else {
+    return false;
+  }
+};
+
 TaskSelectionController.prototype.selection = function () {
   return this._selectedTasks;
 };
@@ -1783,10 +2025,12 @@ function MainController() {
   this._dragController = null;
   this._taskSelectionController = null;
   this._projectSelector = null;
+  this._taskSettingsSelector = null;
+  this._globalKeyHandler = null;
 }
 addAccessors(MainController, [
   "!taskDB", "!dragController", "!taskSelectionController",
-  "!projectSelector"
+  "!projectSelector", "!taskSettingsSelector", "!globalKeyHandler"
 ]);
 
 function MainLayoutManager($container, controller) {
@@ -1907,7 +2151,20 @@ $(function () {
   controller.dragController(new DragController());
   controller.taskSelectionController(new TaskSelectionController());
 
-  controller.projectSelector(ProjectSelector.create(controller).render($('body')));
+  controller.projectSelector(ProjectSelector.create(controller).render());
+  controller.taskSettingsSelector(TaskSettingsSelector.create(controller).render());
+
+  controller.globalKeyHandler(new GlobalKeyHandler({
+  }));
+
+  $('.navitem').each(function (i) {
+    var key = 'M-' + (i+1);
+    var dest = $(this).attr("data-dest");
+    controller.globalKeyHandler().globalKeyMap[key] = function (e) {
+      e.preventDefault();
+      window.location.hash = dest;
+    };
+  });
 
   for (var i = 0; i < 50; i++) {
     tdb.createTask().title("This is task" + i);

@@ -561,7 +561,7 @@ html, body {
     overflow: hidden;
     white-space: nowrap
 }
-.context-menu li:hover {
+.context-menu li:hover, .context-menu li.active {
     background: #6666ff;
     color: #fff;
 }
@@ -608,6 +608,15 @@ li:hover .ProjectSelector-projecticon {
 .ProjectSelector-projectname.noname::after {
     color: #999;
     content: 'Untitled';
+}
+
+.ProjectTypeSelector-projecticon {
+    display: inline-block;
+    width: 20px;
+/*    color: #777;*/
+}
+li:hover .ProjectTypeSelector-projecticon {
+/*    color: #aaa;*/
 }
 
 .FancyCheckbox {

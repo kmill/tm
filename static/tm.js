@@ -665,7 +665,11 @@ function ContextMenu() {
   this.$cloak = null;
   this.$el = null;
   this._closeCallback = null;
+  this._useCloak = true;
 }
+addAccessors(ContextMenu, [
+  "!useCloak"
+]);
 ContextMenu.prototype.render = function () {
   var $dest = $("body");
   this.$cloak = $('<div class="context-menu-cloak">').appendTo($dest);
@@ -689,12 +693,15 @@ ContextMenu.prototype.render = function () {
 ContextMenu.prototype.activate = function ($target, position, /*opt*/closeCallback) {
   this._closeCallback = closeCallback;
 
-  this.$cloak.show();
+  if (this.useCloak()) {
+    this.$cloak.show();
+  }
   this.$el.show();
   this.$el.css("max-height", "none");
   this.$el.css("width", "");
 
-  var myheight = this.$el.outerHeight();
+  var myheight = this.$el.outerHeight(),
+      mywidth = this.$el.outerWidth();
   var toffset, twidth, theight;
 
   if (position === "mouse") {
@@ -734,6 +741,17 @@ ContextMenu.prototype.activate = function ($target, position, /*opt*/closeCallba
     } else {
       this.$el.css("left", (toffset.left + twidth - this.$el.width()) + "px");
     }
+  } else if (position === "submenu") {
+    if (toffset.top + myheight < $(window).height()) {
+      this.$el.css("top", toffset.top);
+    } else {
+      this.$el.css("top", toffset.top + theight - myheight);
+    }
+    if (toffset.left + twidth + mywidth < $(window).width()) {
+      this.$el.css("left", toffset.left+twidth);
+    } else {
+      this.$el.css("left", toffset.left-mywidth);
+    }
   } else {
     throw new Error("Unknown position");
   }
@@ -744,6 +762,7 @@ ContextMenu.prototype.deactivate = function () {
   if (this._closeCallback) {
     this._closeCallback();
   }
+  this._closeCallback = null;
 };
 
 
@@ -837,12 +856,23 @@ TaskSettingsSelector.prototype.render = function () {
   this.contextMenu = new ContextMenu();
   this.contextMenu.render();
   this.$list = $('<ul>').appendTo(this.contextMenu.$el);
+
+  this.projectContextMenu = new ContextMenu();
+  this.projectContextMenu
+    .useCloak(false)
+    .render();
+  
+  this.$projectTypeList = $('<ul>').appendTo(this.projectContextMenu.$el);
+
   return this;
 };
 TaskSettingsSelector.prototype.activate = function (mouse, task, /*opt*/closeCallback) {
   this.task(task);
   this.fill();
-  this.contextMenu.activate(mouse, "mouse", closeCallback);
+  this.contextMenu.activate(mouse, "mouse", _.im(this, function () {
+    this.projectContextMenu.deactivate();
+    closeCallback();
+  }));
 };
 TaskSettingsSelector.prototype.fill = function () {
   this.$list.empty();
@@ -865,7 +895,35 @@ TaskSettingsSelector.prototype.fill = function () {
 
   var $projectType = $('<li class="submenu">').appendTo(this.$list);
   $projectType.text("Project type");
+
+  $projectType.on("mouseover", _.im(this, function (e) {
+    e.stopPropagation();
+    $projectType.addClass("active");
+    this.projectContextMenu.activate($projectType, "submenu");
+  }));
+  this.$list.on("mouseover", _.im(this, function (e) {
+    $projectType.removeClass("active");
+    this.projectContextMenu.deactivate();
+  }));
   
+  this.$projectTypeList.empty();
+  var types = [[null, "None"],
+               ["parallel", "Parallel"],
+               ["sequential", "Sequential"],
+               ["single action", "Single action"]];
+
+  _.each(types, _.im(this, function (desc) {
+    var $item = $('<li>').appendTo(this.$projectTypeList);
+    var $icon = $('<span class="ProjectTypeSelector-projecticon">').appendTo($item);
+    $icon.append(icon_for_project_type(desc[0]));
+    var $text = $('<span class="ProjectTypeSelector-projectname">').appendTo($item);
+    $text.text(desc[1]);
+
+    $item.on("click", _.im(this, function(e) {
+      this.contextMenu.deactivate();
+      this.task().project_type(desc[0]);
+    }));
+  }));
 
   var $createSubtask = $('<li>').appendTo(this.$list);
   $createSubtask.text("Create subtask");
@@ -1775,7 +1833,7 @@ function DatabaseSynchronizer() {
   this._nextSince = -1;
   this.syncTimeout = null;
   this.sendTimeout = null;
-  this._sendDelay = 1000 * 1;
+  this._sendDelay = 1000 * 2;
   this._receiveDelay = 1000 * 20;
 }
 addAccessors(DatabaseSynchronizer, [

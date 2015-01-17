@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <script type="text/javascript" src="/static/fuzzydate.js"></script>
+    <script type="text/javascript">
+      window.addEventListener("load", function () {
+          document.getElementById('date').addEventListener('input', function () {
+//              setTimeout(function () {
+                  var input = document.getElementById('date').value;
+                  var parsed = FuzzyDate.parse(input);
+                  document.getElementById('output').innerHTML = JSON.stringify(parsed);
+//              }, 0);
+          });
+      });
+    </script>
+  </head>
+  <body>
+    <input id='date' type="text" placeholder="Date">
+    <div id='output'></output>
+  </body>
+</html>

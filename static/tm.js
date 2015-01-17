@@ -59,11 +59,12 @@ var days = {
 };
 
 // Converts a date object into a short time string
+function pad2(n) {
+  var o = "0" + n;
+  return o.substring(o.length-2);
+}
+
 function shortTime(date, showTime) {
-  function pad2(n) {
-    var o = "0" + n;
-    return o.substring(o.length-2);
-  }
   var now = new Date();
   var h = date.getHours();
   var hs = h%12 == 0 ? 12 : h%12;
@@ -84,6 +85,33 @@ function shortTime(date, showTime) {
     return days[date.getDay()] + ' ' + (date.getMonth() + 1) + "/" + pad2(date.getDate()) + "/" + pad2(date.getFullYear() % 100) + cptime;
   }
 };
+
+function shortFuzzyTime(date) {
+  var d;
+  if (date.length > 3 || typeof date === 'number') {
+    if (typeof date === 'number') {
+      d = new Date(date);
+    } else {
+      d = new Date(date[0], date[1] - 1, date[2], date[3], date[4]);
+    }
+    var h = d.getHours();
+    var hs = h % 12 == 0 ? 12 : h % 12;
+    var ampm = h < 12 ? "am" : "pm";
+    var time = hs + ":" + pad2(d.getMinutes()) + " " + ampm;
+
+    var now = new Date();
+    if (now.getFullYear() === d.getFullYear()
+        && now.getMonth() === d.getMonth()
+        && now.getDate() === d.getDate()) {
+      return time + ' today';
+    } else {
+      return days[d.getDay()] + ' ' + (d.getMonth() + 1) + "/" + pad2(d.getDate()) + "/" + pad2(d.getFullYear() % 100) + ' ' + time;
+    }
+  } else {
+    d = new Date(date[0], date[1] - 1, date[2]);
+    return days[d.getDay()] + ' ' + (d.getMonth() + 1) + "/" + pad2(d.getDate()) + "/" + pad2(d.getFullYear() % 100);
+  }
+}
 
 // Converts a filesize (in bytes) to a sensible size description
 function sensibleSize(size) {
@@ -341,6 +369,8 @@ function Task() {
   this._updated = null; // task responsible for updating
   this._version = null; // synchronizer responsible for updating
 
+  this._deleted = false;
+
   this._parent = null;
   this._project_type = null;
   this._sort_order = null;
@@ -350,12 +380,10 @@ function Task() {
   this._status_changed = null;
 
   this._tags = null;
+  this._deferred = null;
   this._deadline = null;
-  this._deleted = false;
-  this._scheduled = null;
   this._work_history = null;
   this._recurring = null;
-  this._defer = null;
 
   // internal
   this._modified = false;
@@ -369,8 +397,8 @@ addAccessors(Task, [
   "!created", "updated",
   "!parent", "!project_type", "!sort_order",
   "!status_changed", "!starred",
-  "!tags", "!deadline", "!deleted", "!scheduled", "!work_history", "!recurring",
-  "!defer",
+  "!tags", "!deadline", "!deleted", "!work_history", "!recurring",
+  "!deferred",
 
   "subtasks"
 ], function () {
@@ -495,6 +523,7 @@ Task.prototype.toDict = function () {
     title : this.title(),
     notes : this.notes(),
     created : this.created(),
+    deleted : this.deleted(),
 //    version : this.version(),
 
     parent : this.parent() ? this.parent().id() : null,
@@ -502,7 +531,10 @@ Task.prototype.toDict = function () {
     sort_order : this.sort_order(),
     starred : this.starred(),
     status : this.status(),
-    status_changed : this.status_changed()
+    status_changed : this.status_changed(),
+
+    deferred : this.deferred(),
+    deadline : this.deadline()
   };
 
   return o;
@@ -519,6 +551,9 @@ Task.prototype.updateFromDict = function (o, taskdb) {
   }
   if (_.has(o, 'created') && this.created() !== o.created) {
     this.created(o.created);
+  }
+  if (_.has(o, 'deleted') && this.deleted() !== o.deleted) {
+    this.deleted(o.deleted);
   }
   if (_.has(o, 'version') && this.version() !== o.version) {
     this.version(o.version);
@@ -544,6 +579,12 @@ Task.prototype.updateFromDict = function (o, taskdb) {
   }
   if (_.has(o, 'status_changed') && this.status_changed() !== o.status_changed) {
     this.status_changed(o.status_changed);
+  }
+  if (_.has(o, 'deferred') && !_.isEqual(this.deferred(), o.deferred)) {
+    this.deferred(o.deferred);
+  }
+  if (_.has(o, 'deadline') && !_.isEqual(this.deadline(), o.deadline)) {
+    this.deadline(o.deadline);
   }
 };
 
@@ -666,9 +707,10 @@ function ContextMenu() {
   this.$el = null;
   this._closeCallback = null;
   this._useCloak = true;
+  this._controller = null;
 }
 addAccessors(ContextMenu, [
-  "!useCloak"
+  "!useCloak", "!controller"
 ]);
 ContextMenu.prototype.render = function () {
   var $dest = $("body");
@@ -690,11 +732,21 @@ ContextMenu.prototype.render = function () {
     this.$el.click();
   }));
 };
+ContextMenu.prototype.remove = function () {
+  if (this.$el) {
+    this.$cloak.remove();
+    this.$el.remove();
+  }
+};
 ContextMenu.prototype.activate = function ($target, position, /*opt*/closeCallback) {
   this._closeCallback = closeCallback;
 
   if (this.useCloak()) {
     this.$cloak.show();
+
+    this._oldKeyMap = this.controller().globalKeyHandler().setKeyMap({
+      '<esc>' : _.im(this, 'deactivate')
+    });
   }
   this.$el.show();
   this.$el.css("max-height", "none");
@@ -759,6 +811,10 @@ ContextMenu.prototype.activate = function ($target, position, /*opt*/closeCallba
 ContextMenu.prototype.deactivate = function () {
   this.$cloak.hide();
   this.$el.hide();
+  if (this._oldKeyMap) {
+    this.controller().globalKeyHandler().restoreKeyMap(this._oldKeyMap);
+    this._oldKeyMap = null;
+  }
   if (this._closeCallback) {
     this._closeCallback();
   }
@@ -782,7 +838,7 @@ ProjectSelector.create = function (controller) {
 
 ProjectSelector.prototype.render = function () {
   this.contextMenu = new ContextMenu();
-  this.contextMenu.render();
+  this.contextMenu.controller(this.controller()).render();
 
   this.$projectList = $('<ul>').appendTo(this.contextMenu.$el);
 
@@ -854,7 +910,7 @@ TaskSettingsSelector.create = function (controller) {
 };
 TaskSettingsSelector.prototype.render = function () {
   this.contextMenu = new ContextMenu();
-  this.contextMenu.render();
+  this.contextMenu.controller(this.controller()).render();
   this.$list = $('<ul>').appendTo(this.contextMenu.$el);
 
   this.projectContextMenu = new ContextMenu();
@@ -871,7 +927,9 @@ TaskSettingsSelector.prototype.activate = function (mouse, task, /*opt*/closeCal
   this.fill();
   this.contextMenu.activate(mouse, "mouse", _.im(this, function () {
     this.projectContextMenu.deactivate();
-    closeCallback();
+    if (closeCallback) {
+      closeCallback();
+    }
   }));
 };
 TaskSettingsSelector.prototype.fill = function () {
@@ -945,6 +1003,165 @@ TaskSettingsSelector.prototype.fill = function () {
 
 };
 
+function DatetimeSelector() {
+  this._controller = null;
+  this._selectCallback = null;
+  this._date = null;
+  this._buttonLabel = "Set";
+}
+addAccessors(DatetimeSelector, [
+  "!selectCallback", "!controller", "!date", "!buttonLabel"
+]);
+DatetimeSelector.create = function (controller) {
+  var dts = new DatetimeSelector(controller);
+  return dts;
+};
+DatetimeSelector.prototype.render = function ($dest) {
+  this.$el = $('<div class="DatetimeSelector">').appendTo($dest);
+  var $inputarea = $('<div class="DatetimeSelector-inputarea">').appendTo(this.$el);
+  this.$input = $('<input type="text" placeholder="Date">').appendTo($inputarea);
+  this.$local = $('<input type="checkbox">');
+  this.$set = $('<input type="button">').appendTo($inputarea);
+  $('<label title="When unselected, stores an absolute time with timezone.">Keep in local time</label>').appendTo($inputarea).prepend(this.$local);
+  this.$output = $('<div class="DatetimeSelector-output">').appendTo(this.$el);
+
+  this.$el.on("click contextmenu", function (e) {
+    e.stopPropagation();
+  });
+
+  this.$input.on("keypress", _.im(this, function (e) {
+    if (e.keyCode === 13) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.select();
+    }
+  }));
+
+  this.$set.on("click", _.im(this, 'select'));
+
+  this.$input.on("input", _.im(this, 'change'));
+  this.$local.on("change", _.im(this, 'change'));
+};
+DatetimeSelector.prototype.activate = function (date) {
+  var s;
+  if (date === null) {
+    s = '';
+  } else {
+    s = shortFuzzyTime(date);
+  }
+  this.$input.val(s);
+  this.$local.prop("checked", typeof date !== "number");
+  this.$input.select();
+  this.change();
+  this.$set.attr("value", this.buttonLabel());
+};
+DatetimeSelector.prototype.select = function () {
+  if (this.selectCallback()) {
+    this.selectCallback()(this.date());
+  }
+};
+DatetimeSelector.prototype.change = function () {
+  var d = FuzzyDate.parse(this.$input.val());
+  if (!this.$local.prop("checked")) {
+    d = +(new Date(d[0], d[1]-1, d[2], d[3] || 0, d[4] || 0));
+  }
+  this.date(d);
+  this.$output.text(shortFuzzyTime(d));
+};
+
+function DeferredSelector() {
+  this._task = null;
+  this._controller = null;
+}
+addAccessors(DeferredSelector, [
+  "!task", "!controller"
+]);
+DeferredSelector.create = function (controller) {
+  var ds = new DeferredSelector();
+  ds.controller(controller);
+  return ds;
+};
+DeferredSelector.prototype.render = function () {
+  this.contextMenu = new ContextMenu();
+  this.contextMenu.controller(this.controller()).render();
+  this.$list = $('<ul>').appendTo(this.contextMenu.$el);
+  this.datetimeSelector = DatetimeSelector.create(this.controller());
+  this.datetimeSelector.buttonLabel("Defer");
+  this.datetimeSelector.render(this.contextMenu.$el);
+
+  this.datetimeSelector.selectCallback(_.im(this, "datetimeSelected"));
+
+  var $nodefer = $('<li>Not deferred</li>').appendTo(this.$list);
+  var $later = $('<li>Later</li>').appendTo(this.$list);
+  var $someday = $('<li>Someday</li>').appendTo(this.$list);
+
+  $nodefer.on("click", _.im(this, 'datetimeSelected', null));
+  $later.on("click", _.im(this, 'datetimeSelected', 'later'));
+  $someday.on("click", _.im(this, 'datetimeSelected', 'someday'));
+
+  $('<li class="context-menu-divider">').appendTo(this.$list);
+
+  return this;
+};
+DeferredSelector.prototype.activate = function (task, $target, /*opt*/closeCallback) {
+  this.task(task);
+  this.contextMenu.activate($target, "vertical", _.im(this, function () {
+    if (closeCallback) {
+      closeCallback();
+    }
+  }));
+  var d = typeof task.deferred() === 'string' ? null : task.deferred();
+  this.datetimeSelector.activate(d);
+};
+DeferredSelector.prototype.datetimeSelected = function (date) {
+  this.contextMenu.deactivate();
+  this.task().deferred(date);
+};
+
+function DeadlineSelector() {
+  this._task = null;
+  this._controller = null;
+}
+addAccessors(DeadlineSelector, [
+  "!task", "!controller"
+]);
+DeadlineSelector.create = function (controller) {
+  var ds = new DeadlineSelector();
+  ds.controller(controller);
+  return ds;
+};
+DeadlineSelector.prototype.render = function () {
+  this.contextMenu = new ContextMenu();
+  this.contextMenu.controller(this.controller()).render();
+  this.$list = $('<ul>').appendTo(this.contextMenu.$el);
+  this.datetimeSelector = DatetimeSelector.create(this.controller());
+  this.datetimeSelector.render(this.contextMenu.$el);
+
+  this.datetimeSelector.selectCallback(_.im(this, "datetimeSelected"));
+
+  var $nodeadline = $('<li>No deadline</li>').appendTo(this.$list);
+
+  $nodeadline.on("click", _.im(this, 'datetimeSelected', null));
+
+  $('<li class="context-menu-divider">').appendTo(this.$list);
+
+  return this;
+};
+DeadlineSelector.prototype.activate = function (task, $target, /*opt*/closeCallback) {
+  this.task(task);
+  this.contextMenu.activate($target, "vertical", _.im(this, function () {
+    if (closeCallback) {
+      closeCallback();
+    }
+  }));
+  this.datetimeSelector.activate(task.deadline());
+};
+DeadlineSelector.prototype.datetimeSelected = function (date) {
+  this.contextMenu.deactivate();
+  this.task().deadline(date);
+};
+
+
 function TaskView() {
   this._controller = null;
   this._task = null;
@@ -971,6 +1188,10 @@ TaskView.prototype.task = function (/*opt*/task) {
       this.removeTaskUpdateHandler();
     }
     this.removeTaskUpdateHandler = task ? task.events.on("updated", _.im(this, "taskUpdated")) : null;
+    if (this.removeProjectTaskUpdateHandler) {
+      this.removeProjectTaskUpdateHandler();
+    }
+    this._knownProject = null;
     return this;
   } else {
     return this._task;
@@ -1081,7 +1302,7 @@ TaskView.prototype.render = function ($dest) {
 
   $secondArea.append('<div class="TaskView-button-spacer">');
   
-  this.$projectButton = $('<div class="TaskView-button transient" title="Project">').appendTo($secondArea);
+  this.$projectButton = $('<div class="TaskView-button transient">').appendTo($secondArea);
   this.$projectButton.on("click contextmenu", _.im(this, function (e) {
     e.preventDefault();
     e.stopPropagation();
@@ -1093,11 +1314,41 @@ TaskView.prototype.render = function ($dest) {
                                                  }));
   }));
 
+  var $secondAreaRight = $('<div class="TaskView-secondAreaRight">').appendTo($secondArea);
+
+  this.$deferredButton = $('<div class="TaskView-button transient">').appendTo($secondAreaRight);
+  $secondAreaRight.append('<div class="TaskView-button-spacer">');
+  this.$deadlineButton = $('<div class="TaskView-button transient">').appendTo($secondAreaRight);
+
+  this.$deferredButton.on("click contextmenu", _.im(this, function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.controller().taskSelectionController().setSelection(this);
+    this.$deferredButton.addClass("active");
+    this.controller().deferredSelector().activate(this.task(), this.$deferredButton,
+                                                  _.im(this, function () {
+                                                    this.$deferredButton.removeClass("active");
+                                                  }));
+  }));
+
+  this.$deadlineButton.on("click contextmenu", _.im(this, function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.controller().taskSelectionController().setSelection(this);
+    this.$deadlineButton.addClass("active");
+    this.controller().deadlineSelector().activate(this.task(), this.$deadlineButton,
+                                                  _.im(this, function () {
+                                                    this.$deadlineButton.removeClass("active");
+                                                  }));
+  }));
+  
+
   if (this.task().notes()) {
     this.makeNotesArea(this.task().notes());
   }
 
   this.updateProjectProperties();
+  this.updateDateProperties();
 
   if (this.showSubtasks()) {
     this.taskListView(TaskListView.create(this.controller()).indent(this.indent()+1));
@@ -1135,6 +1386,13 @@ TaskView.prototype.render = function ($dest) {
   this.$dragDest.on("dragover drageenter", _.im(this, "handleDragOver"));
   this.$dragDest.on("dragleave", _.im(this, "handleDragLeave"));
   this.$dragDest.on("drop", _.im(this, "handleDrop"));
+
+  this.$title.on("keypress", _.im(this, function (e) {
+    if (e.keyCode === 13) {
+      e.preventDefault();
+      this.$title.blur();
+    }
+  }));
 
   if (this.controller().taskSelectionController().isCreatedTask(this.task())) {
     this.$title.focus();
@@ -1250,23 +1508,64 @@ function icon_for_project_type(project_type) {
 }
 
 TaskView.prototype.updateProjectProperties = function () {
+
+  if (this.task().parent()) {
+    if (this.task().parent() !== this._knownProject) {
+      if (this.removeProjectTaskUpdateHandler) {
+        this.removeProjectTaskUpdateHandler();
+      }
+      this._knownProject = this.task().parent();
+      this.removeProjectTaskUpdateHandler = this._knownProject.events.on("updated", _.im(this, "taskUpdated"));
+    }
+  } else {
+    if (this.removeProjectTaskUpdateHandler) {
+      this.removeProjectTaskUpdateHandler();
+    }
+  }
+
   this.$title.toggleClass("project", null !== this.task().project_type());
   this.$checkArea.toggle(null === this.task().project_type());
   this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
 //  this.$iconArea.toggleClass("transient", !this.task().project_type());
 
   if (this.task().parent()) {
-    this.$projectButton.text(this.task().parent().title());
+    this.$projectButton.text('Project: ' + this.task().parent().title());
   } else {
     this.$projectButton.text("No project");
   }
   this.$projectButton.toggleClass("transient", this.asSubtask() || !this.task().parent());
 };
 
+TaskView.prototype.updateDateProperties = function () {
+
+  // TODO timer stuff
+
+  var deferred = this.task().deferred();
+  if (deferred === null) {
+    this.$deferredButton.text("Not deferred");
+    this.$deferredButton.addClass("transient");
+  } else if (typeof deferred === 'string') {
+    this.$deferredButton.text(deferred.charAt(0).toUpperCase() + deferred.slice(1));
+    this.$deferredButton.removeClass("transient");
+  } else {
+    this.$deferredButton.text("Deferred until " + shortFuzzyTime(deferred));
+    this.$deferredButton.removeClass("transient");
+  }
+
+  if (null === this.task().deadline()) {
+    this.$deadlineButton.text("No deadline");
+    this.$deadlineButton.addClass("transient");
+  } else {
+    this.$deadlineButton.text("Due " + shortFuzzyTime(this.task().deadline()));
+    this.$deadlineButton.removeClass("transient");
+  }
+};
+
 TaskView.prototype.taskUpdated = function () {
   if (!this.$el) return;
 
   this.updateProjectProperties();
+  this.updateDateProperties();
 
   // title
   if (this.task().title() !== this.$title.val()) {
@@ -1835,6 +2134,8 @@ function DatabaseSynchronizer() {
   this.sendTimeout = null;
   this._sendDelay = 1000 * 2;
   this._receiveDelay = 1000 * 20;
+
+  new EventSystem(this, "message");
 }
 addAccessors(DatabaseSynchronizer, [
   "!sendDelay", "!nextSince", "!receiveDelay"
@@ -1855,6 +2156,7 @@ DatabaseSynchronizer.prototype.taskChanged = function (taskDB, event, task) {
   this._changedIds[task.id()] = task;
   if (!this.syncTimeout) {
     this.syncTimeout = window.setTimeout(_.im(this, 'deferSynchronize'), 0);
+    this.events.notify("message", "changed");
   }
 };
 DatabaseSynchronizer.prototype.deferSynchronize = function () {
@@ -1875,6 +2177,10 @@ DatabaseSynchronizer.prototype.deferSynchronize = function () {
   }, this);
   this._changedIds = {};
 
+  if (!changed) {
+    this.events.notify("message", "synchronized");
+  }
+
   if (changed && !this.sendTimeout) {
     this.sendTimeout = window.setTimeout(_.im(this, 'deferSend'), this.sendDelay());
   }
@@ -1893,12 +2199,15 @@ DatabaseSynchronizer.prototype.deferSend = function () {
   }, this);
   console.log("Saving", _.pluck(senddata, "id"));
   console.log(JSON.stringify(senddata));
+  this.events.notify("message", "synchronizing");
   Request("save", {tasks : senddata})
     .then(_.im(this, function () {
       console.log("heard from server");
       this._toSend = {};
+      this.events.notify("message", "synchronized");
     }), _.im(this, function (message) {
       console.error(message);
+      this.events.notify("message", "error", message);
     }));
 };
 DatabaseSynchronizer.prototype.receive = function () {
@@ -1908,7 +2217,8 @@ DatabaseSynchronizer.prototype.receive = function () {
   }
   Request("tasks", { since : this.nextSince() })
     .then(_.im(this, function (data) {
-        console.log("Received tasks");
+      console.log("Received tasks");
+      this.events.notify("message", "synchronized");
       _.each(data.tasks, function (taskstring) {
         console.log(taskstring);
         var tdict = JSON.parse(taskstring);
@@ -1924,14 +2234,52 @@ DatabaseSynchronizer.prototype.receive = function () {
       this.nextSince(data.next_since);
 
       this._receiveTimeout = window.setTimeout(_.im(this, "receive"), this.receiveDelay());
-    }), _.im(this, function (message) {
+    }), _.im(this, function (message, m2, m3) {
       console.error(message);
+      this.events.notify("message", "error", m2 + ": " + m3);
       this._receiveTimeout = window.setTimeout(_.im(this, "receive"), this.receiveDelay());
     }))
     .failure(function () {
+      this.events.notify("message", "error", "Synchronization failure");
       this._receiveTimeout = window.setTimeout(_.im(this, "receive"), this.receiveDelay());
       console.error(arguments);
     });
+};
+
+function SynchronizerNotifications() {
+  
+}
+SynchronizerNotifications.prototype.synchronizer = function (dbsync) {
+  if (this.removeDBSynchHandler) {
+    this.removeDBSynchHandler();
+  }
+  this.removeDBSynchHandler = dbsync.events.on("message", _.im(this, "message"));
+};
+SynchronizerNotifications.prototype.render = function ($dest) {
+  this.$el = $('<div class="SyncNotif">').appendTo($dest);
+};
+SynchronizerNotifications.prototype.message = function (dbsync, m, message, err) {
+  console.log("message", message);
+  this.$el.empty();
+  var $icon;
+  switch (message) {
+  case 'changed' :
+    $icon = $('<i class="fa fa-circle modified">').appendTo(this.$el);
+    $icon.attr("title", "Local modifications");
+    break;
+  case 'synchronized' :
+    $icon = $('<i class="fa fa-circle">').appendTo(this.$el);
+    $icon.attr("title", "Synchronized");
+    break;
+  case 'synchronizing' :
+    $icon = $('<i class="fa fa-refresh fa-spin">').appendTo(this.$el);
+    $icon.attr("title", "Synchronizing with server");
+    break;
+  case 'error' :
+    $icon = $('<i class="fa fa-exclamation-triangle">').appendTo(this.$el);
+    $icon.attr("title", err);
+    break;
+  }
 };
 
 function InboxView() {
@@ -2097,6 +2445,9 @@ ProjectsView.prototype.detach = function () {
 
 ProjectsView.prototype.remove = function () {
   this.detach();
+  if (this.projectCreateMenu) {
+    this.projectCreateMenu.remove();
+  }
   if (this.removeTaskDBCreateHandler) {
     this.removeTaskDBCreateHandler();
   }
@@ -2108,7 +2459,36 @@ ProjectsView.prototype.render = function ($dest) {
   this.$projectListArea = $('<div class="ProjectsView-plist">').appendTo(this.$el);
   this.$projectTaskArea = $('<div class="ProjectsView-ptask">').appendTo(this.$el);
 
+  this.$pstatus = $('<div class="StatusLine">').appendTo(this.$projectListArea);
   this.$status = $('<div class="StatusLine">').appendTo(this.$projectTaskArea);
+
+  this.$createProjectButton = $('<div class="StatusLineButton">').appendTo(this.$pstatus);
+  this.$createProjectButton.append($('<i class="fa fa-plus">'));
+  this.$createProjectButton.append($('<i class="fa fa-caret-up">'));
+
+  this.projectCreateMenu = new ContextMenu();
+  this.projectCreateMenu.controller(this.controller()).render();
+  var $projectTypeList = $('<ul>').appendTo(this.projectCreateMenu.$el);
+  var ptypes = [["parallel", "Parallel project"],
+               ["sequential", "Sequential project"],
+               ["single action", "Single action list"]];
+  _.each(ptypes, function (desc) {
+    var $item = $('<li>').appendTo($projectTypeList);
+    var $icon = $('<span class="ProjectTypeSelector-projecticon">').appendTo($item);
+    $icon.append(icon_for_project_type(desc[0]));
+    var $text = $('<span class="ProjectTypeSelector-projectname">').appendTo($item);
+    $text.text(desc[1]);
+
+    $item.on("click", _.im(this, function(e) {
+      var t = this.controller().taskDB().createTask();
+      t.project_type(desc[0]);
+      window.location.hash = "#projects/" + t.id();
+    }));
+  }, this);
+  this.$createProjectButton.on("click", _.im(this, function (e) {
+    e.preventDefault();
+    this.projectCreateMenu.activate(this.$createProjectButton, "vertical");
+  }));
 
   this.projectListView(TaskListView.create(this.controller()));
   this.projectListView()
@@ -2143,7 +2523,8 @@ ProjectsView.prototype.render = function ($dest) {
       correctSortOrder(this._projects);
     }));
 
-  this.projectListView().render(this.$projectListArea);
+  var $projectListHolder = $('<div class="ProjectsView-plistholder">').appendTo(this.$projectListArea);
+  this.projectListView().render($projectListHolder);
 
   this.taskListView(TaskListView.create(this.controller()));
   this.taskListView()
@@ -2306,11 +2687,14 @@ function MainController() {
   this._taskSelectionController = null;
   this._projectSelector = null;
   this._taskSettingsSelector = null;
+  this._deferredSelector = null;
+  this._deadlineSelector = null;
   this._globalKeyHandler = null;
 }
 addAccessors(MainController, [
   "!taskDB", "!synchronizer", "!dragController", "!taskSelectionController",
-  "!projectSelector", "!taskSettingsSelector", "!globalKeyHandler"
+  "!projectSelector", "!taskSettingsSelector", "!deferredSelector", "!deadlineSelector",
+  "!globalKeyHandler"
 ]);
 
 function MainLayoutManager($container, controller) {
@@ -2388,11 +2772,13 @@ MainLayoutManager.prototype.doAction = function (action) {
 
 function UserInfo() {
   this.contextMenu = null;
+  this._controller = null;
 }
+addAccessors(UserInfo, ["!controller"]);
 UserInfo.prototype.render = function ($userinfo) {
   this.$userinfo = $userinfo;
   this.contextMenu = new ContextMenu();
-  this.contextMenu.render();
+  this.contextMenu.controller(this.controller()).render();
   var $ul = $('<ul>').appendTo(this.contextMenu.$el);
   var $signOut = $('<li>Sign out</li>').appendTo($ul);
 
@@ -2419,8 +2805,6 @@ $(function () {
     $this.children(".navlabel").css("border-left-color", $this.attr("accent-color"));
   });
 
-  new UserInfo().render($('.UserInfo'));
-
   var tdb = new TaskDatabase();
   var synchronizer = new DatabaseSynchronizer();
   synchronizer.taskDB(tdb);
@@ -2436,9 +2820,17 @@ $(function () {
 
   controller.projectSelector(ProjectSelector.create(controller).render());
   controller.taskSettingsSelector(TaskSettingsSelector.create(controller).render());
+  controller.deferredSelector(DeferredSelector.create(controller).render());
+  controller.deadlineSelector(DeadlineSelector.create(controller).render());
 
   controller.globalKeyHandler(new GlobalKeyHandler({
   }));
+
+  new UserInfo().controller(controller).render($('.UserInfo'));
+
+  var syncNotify = new SynchronizerNotifications();
+  syncNotify.render($('#syncstatus'));
+  syncNotify.synchronizer(synchronizer);
 
   $('.navitem').each(function (i) {
     var key = 'M-' + (i+1);

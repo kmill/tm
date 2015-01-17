@@ -78,6 +78,14 @@ GlobalKeyHandler.prototype.popKeyMap = function () {
     throw new Error("More pops than pushes");
   }
 };
+GlobalKeyHandler.prototype.setKeyMap = function (keymap) {
+  var oldKeyMap = this._keymaps;
+  this._keymaps = [this.globalKeyMap, keymap];
+  return oldKeyMap;
+};
+GlobalKeyHandler.prototype.restoreKeyMap = function (oldKeyMap) {
+  this._keymaps = oldKeyMap;
+};
 GlobalKeyHandler.prototype.lookup = function (chord) {
   for (var i = this._keymaps.length - 1; i >= 0; i--) {
     if (_.has(this._keymaps[i], chord)) {

@@ -185,7 +185,7 @@ html, body {
 }
 
 .InboxView-listholder {
-    padding: 2px;
+    padding: 4px;
     width: 100%;
     height: 100%;
     overflow: auto;
@@ -202,27 +202,29 @@ html, body {
     position: absolute;
     top: 0; bottom: 0; left: 0; width: 300px;
     box-sizing: border-box;
-    padding: 4px 4px;
 }
 
 .ProjectsView-plistholder {
     overflow: auto;
     width: 100%; height: 100%;
+    padding: 4px 6px;
+    box-sizing: border-box;
 }
 
 .ProjectsView-ptask {
     background: white;
     position: absolute;
     top: 0; bottom: 0; left: 300px; right: 0;
-    padding: 2px;
     box-sizing: border-box;
     border-left: 3px solid #aaa;
+    overflow: hidden;
 }
 
 .ProjectsView-listholder {
     width: 100%;
     height: 100%;
-    overflow: hidden;
+    padding: 4px;
+    box-sizing: border-box;
 }
 
 .ProjectsView-createTask {
@@ -245,6 +247,28 @@ html, body {
 }
 .ProjectsView-createTask:active {
     color: #888;
+}
+
+.StarredView {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background: #fff;
+}
+
+.StarredView-heading {
+    font-size: 22px;
+    font-weight: bold;
+    padding: 4px 4px 0 8px;
+}
+
+.StarredView-listholder {
+    padding: 4px;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    box-sizing: border-box;
+    max-width: 800px;
 }
 
 .StatusLine {
@@ -322,7 +346,7 @@ html, body {
 }
 
 .TaskView-main {
-
+    margin-right: 60px;
 }
 
 .TaskView-iconArea {
@@ -416,6 +440,16 @@ html, body {
 .TaskView-button-spacer {
     display: inline-block;
     width: 20px;
+}
+
+.TaskView-button.deadline-pushingit {
+    background: #ffd671;
+    padding: 0 2px;
+}
+.TaskView-button.deadline-overdue {
+    background: #ff6662;
+    color: #fff;
+    padding: 0 2px;
 }
 
 .TaskView-check {

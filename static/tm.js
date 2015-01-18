@@ -517,6 +517,53 @@ Task.prototype.active = function () {
   return !this.deleted() && this.status() !== "done";
 };
 
+Task.prototype.deferredStatus = function () {
+  // returns whether this task is still deferred
+  var deferred = this.deferred();
+  if (null === deferred) {
+    return false;
+  }
+  var d;
+  if (typeof deferred === "number") {
+    d = deferred;
+  } else if (deferred.length === 3) {
+    d = +new Date(deferred[0], deferred[1]-1, deferred[2]);
+  } else {
+    d = +new Date(deferred[0], deferred[1]-1, deferred[2], deferred[3], deferred[4]);
+  }
+  return Date.now() < d;
+};
+
+Task.prototype.deadlineStatus = function (pushingIt) {
+  if (pushingIt === void 0) {
+    pushingIt = 24 * 60 * 60 * 1000;
+  }
+  var deadline = this.deadline();
+  if (deadline === null) {
+    return "ontime";
+  }
+  var d, pi;
+  if (typeof deadline === "number") {
+    d = deadline;
+  } else if (deadline.length === 3) {
+    d = +new Date(deadline[0], deadline[1]-1, deadline[2], 23, 59, 59);    
+  } else {
+    d = +new Date(deadline[0], deadline[1]-1, deadline[2], deadline[3], deadline[4]);
+  }
+  var d2 = new Date(d - pushingIt);
+  pi = +new Date(d2.getFullYear(), d2.getMonth(), d2.getDate());
+
+  var now = Date.now();
+
+  if (now < pi) {
+    return "ontime";
+  } else if (now < d) {
+    return "pushingit";
+  } else {
+    return "overdue"; 
+  }
+};
+
 Task.prototype.toDict = function () {
   var o = {
     id : this.id(),
@@ -1092,12 +1139,21 @@ DeferredSelector.prototype.render = function () {
   this.datetimeSelector.selectCallback(_.im(this, "datetimeSelected"));
 
   var $nodefer = $('<li>Not deferred</li>').appendTo(this.$list);
+  var $p1day = $('<li>+1 day</li>').appendTo(this.$list);
+  var $p1week = $('<li>+1 week</li>').appendTo(this.$list);
+  $('<li class="context-menu-divider">').appendTo(this.$list);
   var $later = $('<li>Later</li>').appendTo(this.$list);
   var $someday = $('<li>Someday</li>').appendTo(this.$list);
 
   $nodefer.on("click", _.im(this, 'datetimeSelected', null));
   $later.on("click", _.im(this, 'datetimeSelected', 'later'));
   $someday.on("click", _.im(this, 'datetimeSelected', 'someday'));
+  $p1day.on("click", _.im(this, function () {
+    this.datetimeSelected(FuzzyDate.parse("+1day"));
+  }));
+  $p1week.on("click", _.im(this, function () {
+    this.datetimeSelected(FuzzyDate.parse("+1week"));
+  }));
 
   $('<li class="context-menu-divider">').appendTo(this.$list);
 
@@ -1470,7 +1526,8 @@ TaskView.prototype.gainFocus = function () {
       if (this.task().project_type() || !this.task().parent()) {
         this.task().addSubtask(task);
       } else {
-        this.task().parent().addSubtask(task);
+        var so = afterSortOrder(this.task().parent().subtasks(), this.task());
+        this.task().parent().addSubtask(task, so);
       }
     })
   });
@@ -1552,12 +1609,25 @@ TaskView.prototype.updateDateProperties = function () {
     this.$deferredButton.removeClass("transient");
   }
 
+  this.$deadlineButton.removeClass("deadline-pushingit").removeClass("deadline-overdue");
   if (null === this.task().deadline()) {
     this.$deadlineButton.text("No deadline");
     this.$deadlineButton.addClass("transient");
   } else {
     this.$deadlineButton.text("Due " + shortFuzzyTime(this.task().deadline()));
     this.$deadlineButton.removeClass("transient");
+
+    switch (this.task().deadlineStatus()) {
+    case "ontime" :
+      break;
+    case "pushingit" :
+      this.$deadlineButton.addClass("deadline-pushingit");
+      break;
+    case "overdue" :
+      this.$deadlineButton.addClass("deadline-overdue");
+      break;
+    }
+
   }
 };
 
@@ -2080,6 +2150,9 @@ function TaskDatabase() {
 
   new EventSystem(this, "created updated");
 }
+addAccessors(TaskDatabase, [
+  "tasks"
+]);
 
 TaskDatabase.prototype.createTask = function () {
   var t = new Task();
@@ -2103,6 +2176,13 @@ TaskDatabase.prototype.ensureTask = function (id) {
     return t;
   }  
 };
+TaskDatabase.prototype.byID = function (id) {
+  if (_.has(this._id_to_task, id)) {
+    return this._id_to_task[id];
+  } else {
+    return null;
+  }
+}
 
 TaskDatabase.prototype.handleUpdated = function (task) {
   this.events.notify("updated", task);
@@ -2194,7 +2274,7 @@ DatabaseSynchronizer.prototype.deferSend = function () {
   _.each(this._toSend, function (b, id) {
     // have to keep version out of backingObject so that _.isEqual works
     var o = _.clone(this._backingObjects[id]);
-    o.version = this.taskDB()._id_to_task[id].version();
+    o.version = this.taskDB().byID(id).version();
     senddata.push(o);
   }, this);
   console.log("Saving", _.pluck(senddata, "id"));
@@ -2398,10 +2478,12 @@ function ProjectsView() {
   this._projectListView = null;
   this._taskListView = null;
   this._activeProject = null;
+  this._projectToTry = null;
 }
 
 addAccessors(ProjectsView, [
-  "!controller", "!projectListView", "!taskListView", "!activeProject"
+  "!controller", "!projectListView", "!taskListView", "!activeProject",
+  "!projectToTry"
 ]);
 
 ProjectsView.prototype.taskDB = function (/*opt*/taskDB) {
@@ -2558,6 +2640,11 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
     this.taskListView().clear();
   }
 
+  if (!this.activeProject() && this.projectToTry() && this.taskDB().byID(this.projectToTry())) {
+    window.location.hash = '#projects/' + this.projectToTry();
+    return;
+  }
+
   this._projects = this.taskDB().getProjects();
   correctSortOrder(this._projects);
   this.projectListView().updateSubtasks(this._projects);
@@ -2580,13 +2667,15 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
 };
 
 ProjectsView.prototype.hashArgument = function (arg) {
+  if (arg) {
+    this.projectToTry(arg);
+  }
+
   var oarg = arg;
   if (!arg && this.activeProject() && this.activeProject().project_type()) {
     arg = this.activeProject().id();
   }
-  if (_.has(this.controller().taskDB()._id_to_task, arg)) {
-    this.activeProject(this.controller().taskDB()._id_to_task[arg] || null);
-  }
+  this.activeProject(this.controller().taskDB().byID(arg));
   if (arg && !this.activeProject()) {
     window.location.hash = "projects";
     return;
@@ -2597,6 +2686,106 @@ ProjectsView.prototype.hashArgument = function (arg) {
   }
   this.refresh();
   console.log(arg);
+};
+
+
+function StarredView() {
+  this._taskDB = null;
+  this._controller = null;
+  this._taskListViews = {};
+
+  this.sections = [
+    {name : 'Overdue',
+     filter : function (task) { return task.active() && task.deadlineStatus() === 'overdue'; }
+    },
+    {name : 'Starred',
+     filter : function (task) { return task.active() && task.starred(); }
+    },
+    {name : 'Due soon',
+     filter : function (task) { return task.active() && task.deadlineStatus() === 'pushingit'; }
+    },
+  ];
+}
+addAccessors(StarredView, [
+  "!controller"
+]);
+StarredView.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBCreateHandler) {
+      this.removeTaskDBCreateHandler();
+    }
+    this.removeTaskDBCreateHandler = taskDB.events.on("created updated", _.im(this, "taskCreated"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+StarredView.prototype.taskCreated = function (task) {
+  if (!this.refreshTimeout) {
+    this.refreshTimeout = window.setTimeout(_.im(this, "refresh"), 0);
+  }
+};
+StarredView.create = function (controller) {
+  var sv = new this();
+  sv.controller(controller);
+  sv.taskDB(controller.taskDB());
+  return sv;
+};
+StarredView.prototype.detach = function () {
+  _.each(this._taskListViews, function (tlv) {
+    tlv.remove();
+  });
+  this._taskListViews = {};
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+StarredView.prototype.remove = function () {
+  this.detach();
+  if (this.removeTaskDBCreateHandler) {
+    this.removeTaskDBCreateHandler();
+  }
+};
+StarredView.prototype.render = function ($dest) {
+  this.$el = $('<div class="StarredView">').appendTo($dest);
+
+  this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+
+  $('<div class="StarredView-heading">Starred</div>').appendTo(this.$el);
+  var $starredList = $('<div class="StarredView-listholder">').appendTo(this.$el);
+
+  var tlv = this._taskListViews['starred'] = TaskListView.create(this.controller());
+  tlv
+    .viewFactory(_.im(this, function (task) {
+      var tv = TaskView.create(this.controller(), task);
+      tv.showSubtasks(true);
+      return tv;
+    }))
+    .oldTaskViewFilter(function (tv) {
+      return tv.task().starred();
+    })
+    .render($starredList);
+};
+StarredView.prototype.refresh = function (/*opt*/sweep) {
+  this.refreshTimeout = null;
+
+  if (sweep) {
+    _.each(this._taskListViews, function (tlv) {
+      tlv.clear();
+    });
+  }
+  this._taskListViews['starred'].updateSubtasks(
+    _.filter(this.controller().taskDB()._tasks,
+             function (task) { return task.active() && task.starred(); })
+  );
+/*
+  this.$status.text(pluralize(this._inboxtasks.length, "task"));
+*/
+};
+StarredView.prototype.hashArgument = function (arg) {
+  this.refresh();
 };
 
 
@@ -2711,6 +2900,9 @@ function MainLayoutManager($container, controller) {
     },
     "projects" : function () {
       return ProjectsView.create(controller);
+    },
+    "starred" : function () {
+      return StarredView.create(controller);
     },
   };
 

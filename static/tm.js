@@ -3716,10 +3716,27 @@ UserInfo.prototype.render = function ($userinfo) {
   this.contextMenu = new ContextMenu();
   this.contextMenu.controller(this.controller()).render();
   var $ul = $('<ul>').appendTo(this.contextMenu.$el);
+  var $downloadData = $('<li>Download data</li>').appendTo($ul);
   var $signOut = $('<li>Sign out</li>').appendTo($ul);
 
   $signOut.on("click", _.im(this, function (e) {
     window.location = "/signout";
+  }));
+
+  $downloadData.on("click", _.im(this, function (e) {
+    var data = [];
+    _.each(this.controller().taskDB()._tasks, function (task) {
+      data.push(task.toDict());
+    }, this);
+    var json = JSON.stringify(data);
+    var $link = $('<a target="_blank">');
+    var blob = new Blob([json], {type : "text/json"});
+    $link
+      .attr("href", URL.createObjectURL(blob))
+      .attr("download", "tasks.json");
+    $link.appendTo(document.body);
+    $link[0].click();
+    $link.remove();
   }));
   
   this.$userinfo.on("click contextmenu", _.im(this, function (e) {

@@ -117,7 +117,7 @@ function shortTime(date, showTime) {
 
 function shortFuzzyTime(date) {
   var d;
-  if (date.length > 3 || typeof date === 'number') {
+  if (typeof date === 'number' || date.length > 3) {
     if (typeof date === 'number') {
       d = new Date(date);
     } else {
@@ -139,6 +139,28 @@ function shortFuzzyTime(date) {
   } else {
     d = new Date(date[0], date[1] - 1, date[2]);
     return days[d.getDay()] + ' ' + (d.getMonth() + 1) + "/" + pad2(d.getDate()) + "/" + pad2(d.getFullYear() % 100);
+  }
+}
+
+function shortFuzzyDateDescription(date) {
+  var d;
+  if (typeof date === "number") {
+    d = new Date(date);
+  } else {
+    d = new Date(date[0], date[1] - 1, date[2]);
+  }
+  var now = new Date();
+  now = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var diff = d - now;
+  var days = diff / 1000 / 60 / 60 / 24;
+  console.log(date, d, now, diff, days);
+  if (days < 0) {
+    return '' + pluralize(-days, 'day') + ' ago';
+  } else if (days < 32) {
+    return '' + pluralize(days, 'day') + ' from now';
+  } else {
+    var months = (d.getMonth() + d.getFullYear() * 12) - (now.getMonth() + now.getFullYear() * 12);
+    return '' + pluralize(months, 'month') + ' from now';
   }
 }
 
@@ -426,22 +448,31 @@ function Task() {
 
   this._subtasks = [];
 
+  this._next_task = true;
+  this._available_task = true;
+
+  this._cached_deferred = null;
+  this._cached_deadline = null;
+
   new EventSystem(this, "updated");
 }
 addAccessors(Task, [
   "!id", "!title", "!notes",
   "!created", "updated",
-  "!parent", "!project_type", "!sort_order",
+  "!parent","!sort_order",
   "!status_changed", "!starred", "!reviewed",
   "!tags", "!deadline", "!deleted", "!work_history", "!recurring",
-  "!deferred",
-
-  "subtasks"
+  "!deferred"
 ], function () {
   this.update();
 });
 addAccessors(Task, [
-  "!version"
+  "!next_task", "!available_task"
+], function () {
+  this.update(false);
+});
+addAccessors(Task, [
+  "!version", "subtasks"
 ]);
 
 Task.statuses = [null, "done"];
@@ -461,10 +492,11 @@ Task.prototype.status = function (/*opt*/status) {
 };
 
 Task.prototype.setStatus = function (status) {
-  return this
+  this
     .status(status)
     .status_changed(_.now())
     .reviewed(false);
+  return this;
 };
 
 Task.project_types = [null, "single action", "parallel", "sequential"];
@@ -476,6 +508,7 @@ Task.prototype.project_type = function (/*opt*/project_type) {
     if (this._project_type !== project_type) {
       this._project_type = project_type;
       this.update();
+      this.updateSubtaskAvailability();
     }
     return this;
   } else {
@@ -485,6 +518,9 @@ Task.prototype.project_type = function (/*opt*/project_type) {
 
 Task.prototype.update = function (/*opt*/updateTime) {
   if (updateTime === void 0) { updateTime = true; }
+
+  this._cached_deferred = null;
+  this._cached_deadline = null;
 
   if (updateTime) {
     this._updated = _.now();
@@ -520,6 +556,7 @@ Task.prototype.detachParent = function () {
     this.parent().removeSubtask(this);
     this.parent(null).sort_order(_.now());
   }
+  this.next_task(true).available_task(true);
   return this;
 };
 Task.prototype.removeSubtask = function (task) {
@@ -556,6 +593,28 @@ Task.prototype.addSubtask = function (task, /*opt*/sort_order) {
   correctSortOrder(this._subtasks);
   this.update(false);
 
+  this.updateSubtaskAvailability();
+
+  return this;
+};
+Task.prototype.updateSubtaskAvailability = function () {
+  var ast = this.activeSubtasks();
+  var pt = this.project_type();
+  for (var i = 0; i < ast.length; i++) {
+    switch (pt) {
+    case "parallel" :
+      ast[i].next_task(i === 0).available_task(true);
+      break;
+    case "sequential" :
+      ast[i].next_task(i === 0).available_task(i === 0);
+      break;
+    case "single action" :
+      /* fall through */
+    default :
+      ast[i].next_task(true).available_task(true);
+      break;
+    }
+  }
   return this;
 };
 
@@ -567,26 +626,46 @@ Task.prototype.active = function () {
   return !this.deleted() && this.status() !== "done";
 };
 
+Task.prototype.safeToFinish = function () {
+  // for deletion and compeltion
+  return !_.any(this.subtasks(), function (task) { return task.active(); });
+};
+
 Task.prototype.deferredStatus = function () {
   // returns whether this task is still deferred
-  var deferred = this.deferred();
-  if (null === deferred) {
+  if (typeof this.deferred() === 'string') {
+    return true;
+  }
+  var deferredTime = this.getDeferredTime();
+  if (null === deferredTime) {
     return false;
-  }
-  var d;
-  if (typeof deferred === "number") {
-    d = deferred;
-  } else if (deferred.length === 3) {
-    d = +new Date(deferred[0], deferred[1]-1, deferred[2]);
   } else {
-    d = +new Date(deferred[0], deferred[1]-1, deferred[2], deferred[3], deferred[4]);
+    return Date.now() < +deferredTime;
   }
-  return Date.now() < d;
+  return Date.now() < +deferredTime;
+};
+
+Task.prototype.getDeferredTime = function () {
+  // returns null or a Date
+  var deferred = this.deferred();
+  if (!deferred || typeof deferred === "string") {
+    return null;
+  }
+  if (this._cached_deferred !== null) {
+    return this._cached_deferred;
+  } else if (typeof deferred === "number") {
+    return this._cached_deferred = new Date(deferred);
+  } else if (deferred.length === 3) {
+    return this._cached_deferred = new Date(deferred[0], deferred[1]-1, deferred[2]);
+  } else {
+    return this._cached_deferred = new Date(deferred[0], deferred[1]-1, deferred[2],
+                                            deferred[3], deferred[4]);
+  }
 };
 
 Task.prototype.deadlineStatus = function (pushingIt) {
   if (pushingIt === void 0) {
-    pushingIt = 24 * 60 * 60 * 1000;
+    pushingIt = 3 * 24 * 60 * 60 * 1000;
   }
   var deadline = this.deadline();
   if (deadline === null) {
@@ -810,9 +889,10 @@ function ContextMenu() {
   this._useCloak = true;
   this._controller = null;
   this._active = false;
+  this._keyMap = {};
 }
 addAccessors(ContextMenu, [
-  "!useCloak", "!controller", "!active"
+  "!useCloak", "!controller", "!active", "!keyMap"
 ]);
 ContextMenu.currZIndex = 1000;
 ContextMenu.prototype.render = function () {
@@ -834,6 +914,8 @@ ContextMenu.prototype.render = function () {
     e.preventDefault();
     this.$el.click();
   }));
+
+  this.keyMap()['<esc>'] = _.im(this, 'deactivate');
 };
 ContextMenu.prototype.remove = function () {
   if (this.$el) {
@@ -855,9 +937,7 @@ ContextMenu.prototype.activate = function ($target, position, /*opt*/closeCallba
   if (this.useCloak()) {
     this.$cloak.show();
 
-    this._oldKeyMap = this.controller().globalKeyHandler().setKeyMap({
-      '<esc>' : _.im(this, 'deactivate')
-    });
+    this._oldKeyMap = this.controller().globalKeyHandler().setKeyMap(this.keyMap());
   }
   this.$el.show();
   this.$el.css("max-height", "none");
@@ -1054,6 +1134,11 @@ TaskSettingsSelector.prototype.fill = function () {
   $complete.text(nextStatusState === "done" ? "Mark completed" : "Unmark completed");
 
   $complete.on("click", _.im(this, function (e) {
+    if (nextStatusState !== null && !this.task().safeToFinish()) {
+      if (!confirm("This task has active subtasks. Mark as completed anyway?")) {
+        return;
+      }
+    }
     this.task().setStatus(nextStatusState);
   }));
 
@@ -1121,6 +1206,11 @@ TaskSettingsSelector.prototype.fill = function () {
   $delete.text(nextDeleteState ? "Delete" : "Restore");
 
   $delete.on("click", _.im(this, function (e) {
+    if (nextDeleteState && !this.task().safeToFinish()) {
+      if (!confirm("This task has active subtasks.  Delete anyway?")) {
+        return;
+      }
+    }
     this.task().deleted(nextDeleteState);
   }));
 
@@ -1331,6 +1421,12 @@ CreateTaskMenu.prototype.render = function () {
     this.contextMenu.deactivate();
   }));
 
+  this.contextMenu.keyMap()['<esc>'] = function () { $discardButton.click(); };
+  this.contextMenu.keyMap()['<return>'] = function () {
+    $doneButton.focus(); // to save changes to task
+    $doneButton.click();
+  };
+
   return this;
 };
 CreateTaskMenu.prototype.activate = function ($dest) {
@@ -1449,6 +1545,7 @@ TaskView.prototype.render = function ($dest) {
   this.$el = $('<div class="TaskView">').appendTo($dest);
 
   this.$container = $('<div class="TaskView-container" draggable="true">').appendTo(this.$el);
+  this.$container.toggleClass("TaskView-available", this.task().available_task());
   this.updateIndent();
   this.$checkArea = $('<div class="TaskView-check">').appendTo(this.$container);
   this.$mainArea = $('<div class="TaskView-main">').appendTo(this.$container);
@@ -1547,7 +1644,9 @@ TaskView.prototype.render = function ($dest) {
       }
     }));
     this.$subtasks = $('<div class="TaskView-subtasks">').appendTo(this.$el);
-    this.taskListView().render(this.$subtasks).updateSubtasks(this.task().activeSubtasks());
+    this.taskListView()
+      .render(this.$subtasks)
+      .updateSubtasks(this.subtasksToView());
   }
 
   this.$container.on("click", _.im(this, "clickedContainer"));
@@ -1603,6 +1702,12 @@ TaskView.prototype.notesChanged = function () {
 TaskView.prototype.statusChanged = function () {
   var newStatus = this.status();
   if (newStatus !== this.task().status()) {
+    if (newStatus !== null && !this.task().safeToFinish()) {
+      if (!confirm("This task has active subtasks. Mark as completed anyway?")) {
+        this.status(null);
+        return;
+      }
+    }
     this.task().setStatus(newStatus);
   }
 };
@@ -1728,12 +1833,15 @@ TaskView.prototype.updateDateProperties = function () {
   var deferred = this.task().deferred();
   if (deferred === null) {
     this.$deferredButton.text("Not deferred");
+    this.$deferredButton.attr("title", "");
     this.$deferredButton.addClass("transient");
   } else if (typeof deferred === 'string') {
     this.$deferredButton.text(deferred.charAt(0).toUpperCase() + deferred.slice(1));
+    this.$deferredButton.attr("title", "");
     this.$deferredButton.removeClass("transient");
   } else {
     this.$deferredButton.text("Deferred until " + shortFuzzyTime(deferred));
+    this.$deferredButton.attr("title", shortFuzzyDateDescription(deferred));
     this.$deferredButton.removeClass("transient");
   }
 
@@ -1743,6 +1851,7 @@ TaskView.prototype.updateDateProperties = function () {
     this.$deadlineButton.addClass("transient");
   } else {
     this.$deadlineButton.text("Due " + shortFuzzyTime(this.task().deadline()));
+    this.$deadlineButton.attr("title", shortFuzzyDateDescription(this.task().deadline()));
     this.$deadlineButton.removeClass("transient");
 
     switch (this.task().deadlineStatus()) {
@@ -1781,6 +1890,8 @@ TaskView.prototype.taskUpdated = function () {
   this.updateDateProperties();
   this.updateExtraStatus();
 
+  this.$container.toggleClass("TaskView-available", this.task().available_task());
+
   // title
   if (this.task().title() !== this.$title.val()) {
     this.$title.val(this.task().title());
@@ -1815,16 +1926,26 @@ TaskView.prototype.taskUpdated = function () {
   }
 
   if (this.taskListView()) {
-    this.taskListView().updateSubtasks(this.task().activeSubtasks());
+    this.taskListView().updateSubtasks(this.subtasksToView());
   }
 };
 
-TaskView.prototype.tickle = function () {
+TaskView.prototype.subtasksToView = function () {
+  return _.filter(this.task().activeSubtasks(),
+                  function (task) { return !task.deferredStatus(); });
+};
+
+TaskView.prototype.tickle = function (stats) {
   if (this.notes) {
     this.notes.refresh();
   }
+  if (this.task().project_type()) {
+    stats.project();
+  } else {
+    stats.task();
+  }
   if (this.taskListView()) {
-    this.taskListView().tickle();
+    this.taskListView().tickle(stats);
   }
 }
 
@@ -1907,6 +2028,35 @@ TaskView.prototype.handleDrop = function (e) {
   }
 };
 
+function TickleStats() {
+  this._tasks = 0;
+  this._projects = 0;
+}
+addAccessors(TickleStats, [
+  "tasks", "projects"
+]);
+TickleStats.create = function () {
+  return new this();
+};
+TickleStats.prototype.task = function () {
+  this._tasks++;
+  return this;
+};
+TickleStats.prototype.project = function () {
+  this._projects++;
+  return this;
+};
+TickleStats.prototype.toString = function () {
+  var parts = [];
+  if (this._projects > 0) {
+    parts.push(pluralize(this._projects, "project"));
+  }
+  if (this._projects === 0 || this._tasks > 0) {
+    parts.push(pluralize(this._tasks, "task"));
+  }
+  return parts.join(", ");
+};
+
 function ProjectTaskView() {
   this._controller = null;
   this._task = null;
@@ -1975,6 +2125,7 @@ ProjectTaskView.prototype.render = function ($dest) {
   this.updateIndent();
 
   this.$iconArea = $('<div class="ProjectTaskView-iconArea">').appendTo(this.$container);
+  this.$statusArea = $('<div class="ProjectTaskView-statusArea">').appendTo(this.$container);
   this.$title = $('<div class="ProjectTaskView-title">').appendTo(this.$container);
 
   this.$dragDest = $('<div class="ProjectTaskView-dragDest">').appendTo(this.$container);
@@ -2014,6 +2165,24 @@ ProjectTaskView.prototype.render = function ($dest) {
 };
 
 ProjectTaskView.prototype.refresh = function () {
+  var available = 0, total = 0;
+  _.each(this.task().activeSubtasks(), function (task) {
+    if (task.deferredStatus()) { return; }
+    total++;
+    if (task.available_task()) {
+      available++;
+    }
+  });
+  var s = "";
+  if (total > 0) {
+    if (available !== total) {
+      s = '' + available + "/" + total;
+    } else {
+      s = '' + available;
+    }
+  }
+  this.$statusArea.text(s);
+
   this.$title.text(this.task().title());
   this.$title.toggleClass("noname", !this.task().title());
   this.$iconArea.empty().append(icon_for_project_type(this.task().project_type()));
@@ -2025,7 +2194,9 @@ ProjectTaskView.prototype.refresh = function () {
                                                }));
   }
 };
-ProjectTaskView.prototype.tickle = function () {
+ProjectTaskView.prototype.tickle = function (stats) {
+  stats.project();
+  this.taskListView().tickle(stats);
 };
 
 ProjectTaskView.prototype.remove = function () {
@@ -2211,7 +2382,6 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
   if (new_stvs.length !== 0 && new_stvs.length === this.subtaskViews().length
       && _.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) {return stvs[0] === stvs[1]; })) {
     console.log("skipping updateSubtasks");
-    this.tickle();
     return this;
   }
   console.log("noskip");
@@ -2233,7 +2403,6 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
   _.each(new_stvs, function (stv) {
     if (stv.$el) {
       stv.$el.appendTo(this.$el);
-      stv.tickle();
     } else {
       stv.render(this.$el);
     }
@@ -2245,9 +2414,9 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
 
   return this;
 };
-TaskListView.prototype.tickle = function () {
+TaskListView.prototype.tickle = function (stats) {
   console.log("tickle");
-  _.invoke(this.subtaskViews(), "tickle");
+  _.invoke(this.subtaskViews(), "tickle", stats);
 };
 
 TaskListView.prototype.controllerDragStart = function () {
@@ -2364,7 +2533,11 @@ TaskDatabase.prototype.handleUpdated = function (task) {
 TaskDatabase.prototype.getProjects = function () {
   return _.chain(this._tasks)
     .filter(function (task) {
-      return !task.deleted() && task.parent() === null && task.status() === null && task.project_type() !== null;
+      return (!task.deleted()
+              && !task.deferredStatus()
+              && task.parent() === null
+              && task.status() === null
+              && task.project_type() !== null);
     })
     .value();
 };
@@ -2372,7 +2545,11 @@ TaskDatabase.prototype.getProjects = function () {
 TaskDatabase.prototype.getInbox = function () {
   return _.chain(this._tasks)
     .filter(function (task) {
-      return !task.deleted() && task.parent() === null && task.status() === null && task.project_type() === null;
+      return (!task.deleted()
+              && !task.deferredStatus()
+              && task.parent() === null
+              && task.status() === null
+              && task.project_type() === null);
     })
     .value();
 };
@@ -2464,7 +2641,10 @@ DatabaseSynchronizer.prototype.deferSend = function () {
     }), _.im(this, function (message) {
       console.error(message);
       this.events.notify("message", "error", message);
-    }));
+    }))
+    .failure(function () {
+      console.error("Failure in 'save'");
+    });
 };
 DatabaseSynchronizer.prototype.receive = function () {
   if (this._receiveTimeout) {
@@ -2639,9 +2819,11 @@ InboxView.prototype.refresh = function (/*opt*/sweep) {
   this._inboxtasks = this.controller().taskDB().getInbox();
   correctSortOrder(this._inboxtasks);
 
-  this.$status.text(pluralize(this._inboxtasks.length, "task"));
-
   this.taskListView().updateSubtasks(this._inboxtasks);
+
+  var stats = TickleStats.create();
+  this.taskListView().tickle(stats);
+  this.$status.text(stats.toString());
 };
 
 InboxView.prototype.hashArgument = function (arg) {
@@ -2723,6 +2905,8 @@ ProjectsView.prototype.render = function ($dest) {
   this.$createProjectButton = $('<div class="StatusLineButton">').appendTo(this.$pstatus);
   this.$createProjectButton.append($('<i class="fa fa-plus">'));
   this.$createProjectButton.append($('<i class="fa fa-caret-up">'));
+
+  this.$pstatus_count = $('<span class="ProjectsView-pstatus-count">').appendTo(this.$pstatus);
 
   this.projectCreateMenu = new ContextMenu();
   this.projectCreateMenu.controller(this.controller()).render();
@@ -2825,6 +3009,10 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
   correctSortOrder(this._projects);
   this.projectListView().updateSubtasks(this._projects);
 
+  var pstats = TickleStats.create();
+  this.projectListView().tickle(pstats);
+  this.$pstatus_count.text(pstats.toString());
+
   if (this.activeProject()) {
     this.taskListView().updateSubtasks([this.activeProject()]);
 
@@ -2833,7 +3021,11 @@ ProjectsView.prototype.refresh = function (/*opt*/sweep) {
       $(this).toggleClass("active", $(this).attr("data-project-id") === activeId);
     });
 
-    this.$status.text(pluralize(0, "task"));
+    var stats = TickleStats.create();
+    this.taskListView().tickle(stats);
+    this.$status.text(stats.toString());
+    console.log(stats);
+
     this.$createTask.show();
   } else {
     this.taskListView().updateSubtasks([]);
@@ -2988,13 +3180,111 @@ StarredView.prototype.refresh = function (/*opt*/sweep) {
     }
   }, this);
 
-/*
-  this.$status.text(pluralize(this._inboxtasks.length, "task"));
-*/
+  var stats = TickleStats.create();
+  _.each(this._taskListViews, function (tlv) {
+    tlv.tickle(stats);
+  });
+
+  this.$status.text(stats.toString());
+
 };
 StarredView.prototype.hashArgument = function (arg) {
   this.refresh();
 };
+
+function UpNextView() {
+  this._taskDB = null;
+  this._controller = null;
+  this._taskListView = null;
+}
+addAccessors(UpNextView, [
+  "!controller", "!taskListView"
+]);
+UpNextView.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBCreateHandler) {
+      this.removeTaskDBCreateHandler();
+    }
+    this.removeTaskDBCreateHandler = taskDB.events.on("created updated", _.im(this, "taskCreated"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+UpNextView.prototype.taskCreated = function (task) {
+  if (!this.refreshTimeout) {
+    this.refreshTimeout = window.setTimeout(_.im(this, "refresh"), 0);
+  }
+};
+UpNextView.create = function (controller) {
+  var rv = new this();
+  rv.controller(controller);
+  rv.taskDB(controller.taskDB());
+  return rv;
+};
+UpNextView.prototype.detach = function () {
+  if (this._taskListView) {
+    this._taskListView.detach();
+  }
+  this._taskListView = null;
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+UpNextView.prototype.remove = function () {
+  this.detach();
+  if (this.removeTaskDBCreateHandler) {
+    this.removeTaskDBCreateHandler();
+  }
+};
+UpNextView.prototype.render = function ($dest) {
+  this.$el = $('<div class="UpNextView">').appendTo($dest);
+  this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+  var $holder = $('<div class="UpNextView-listholder">').appendTo(this.$el);
+  this.taskListView(TaskListView.create(this.controller()));
+  this.taskListView()
+    .viewFactory(_.im(this, function (task) {
+      var tv = TaskView.create(this.controller(), task);
+      return tv;
+    }))
+    .oldTaskViewFilter(function (tv) {
+      return tv.task().active() && tv.task().parent();
+    })
+    .sortFunction(Lexicographic([CompareOn(Task.compare, 'parent'),
+                                 CompareOn(LTCompare, function (t) { return t.parent().id(); }),
+                                 Task.compare]))
+    .render($holder);
+
+  this.refresh();
+
+  return this;
+};
+UpNextView.prototype.refresh = function (/*opt*/sweep) {
+  this.refreshTimeout = null;
+  if (sweep) {
+    this.taskListView().clear();
+  }
+  this._tasks = _.filter(this.taskDB()._tasks,
+                         function (task) {
+                           return (task.active()
+                                   && !task.deferredStatus()
+                                   && !task.project_type()
+                                   && task.parent()
+                                   && task.next_task());
+                         });
+  this.taskListView().updateSubtasks(this._tasks);
+
+  var stats = TickleStats.create();
+  this.taskListView().tickle(stats);
+  this.$status.text(stats.toString());
+};
+UpNextView.prototype.hashArgument = function (arg) {
+  this.refresh();
+};
+
+
 
 function ReviewView() {
   this._taskDB = null;
@@ -3076,10 +3366,160 @@ ReviewView.prototype.refresh = function (/*opt*/sweep) {
                                    && !task.reviewed());
                          });
   this.taskListView().updateSubtasks(this._tasks);
+
+  var stats = TickleStats.create();
+  this.taskListView().tickle(stats);
+  this.$status.text(stats.toString());
 };
 ReviewView.prototype.hashArgument = function (arg) {
   this.refresh();
 };
+
+
+function DeferredView() {
+  this._taskDB = null;
+  this._controller = null;
+  this._taskListViews = {};
+  this._$taskListViewsHolders = {};
+
+  this.sections = [
+    {name : 'Waiting',
+     filter : function (task) { return task.deferred() === 'waiting'; }
+    },
+    {name : 'Deferred',
+     filter : function (task) { return task.getDeferredTime() !== null && task.deferredStatus(); },
+     sort : Lexicographic([CompareOn(LTCompare, 'getDeferredTime'),
+                           CompareOn(LTCompare, 'sort_order'),
+                           CompareOn(LTCompare, 'title')])
+    },
+    {name : 'Later',
+     filter : function (task) { return task.deferred() === 'later'; }
+    },
+    {name : 'Someday',
+     filter : function (task) { return task.deferred() === 'someday'; }
+    },
+  ];
+}
+addAccessors(DeferredView, [
+  "!controller"
+]);
+DeferredView.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBCreateHandler) {
+      this.removeTaskDBCreateHandler();
+    }
+    this.removeTaskDBCreateHandler = taskDB.events.on("created updated", _.im(this, "taskCreated"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+DeferredView.prototype.taskCreated = function (task) {
+  if (!this.refreshTimeout) {
+    this.refreshTimeout = window.setTimeout(_.im(this, "refresh"), 0);
+  }
+};
+DeferredView.create = function (controller) {
+  var dv = new this();
+  dv.controller(controller);
+  dv.taskDB(controller.taskDB());
+  return dv;
+};
+DeferredView.prototype.detach = function () {
+  _.each(this._taskListViews, function (tlv) {
+    tlv.remove();
+  });
+  this._taskListViews = {};
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+DeferredView.prototype.remove = function () {
+  this.detach();
+  if (this.removeTaskDBCreateHandler) {
+    this.removeTaskDBCreateHandler();
+  }
+};
+DeferredView.prototype.render = function ($dest) {
+  this.$el = $('<div class="DeferredView">').appendTo($dest);
+
+  this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+
+  _.each(this.sections, function (section) {
+    var $holder = $('<div class="DeferredView-section">').appendTo(this.$el);
+    this._$taskListViewsHolders[section.name] = $holder;
+    
+    $holder.append($('<div class="DeferredView-heading">').text(section.name));
+    var $list = $('<div class="DeferredView-listholder">').appendTo($holder);
+
+    var tlv = this._taskListViews[section.name] = TaskListView.create(this.controller());
+    tlv
+      .viewFactory(_.im(this, function (task) {
+        var tv = TaskView.create(this.controller(), task);
+        tv.showSubtasks(true);
+        return tv;
+      }))
+      .oldTaskViewFilter(function (tv) {
+        return section.filter(tv.task());
+      });
+    if (_.has(section, 'sort')) {
+      tlv.sortFunction(section.sort);
+    }
+    tlv.render($list);
+  }, this);
+
+  this.refresh();
+
+  return this;
+};
+DeferredView.prototype.refresh = function (/*opt*/sweep) {
+  this.refreshTimeout = null;
+
+  if (sweep) {
+    _.each(this._taskListViews, function (tlv) {
+      tlv.clear();
+    });
+  }
+
+  var sectionTasks = {};
+  _.each(this.sections, function (section) {
+    sectionTasks[section.name] = [];
+  });
+
+  _.each(this.controller().taskDB()._tasks, function (task) {
+    if (task.active()) {
+      for (var i = 0; i < this.sections.length; i++) {
+        var section = this.sections[i];
+        if (section.filter(task)) {
+          sectionTasks[section.name].push(task);
+        }
+      }
+    }
+  }, this);
+
+  _.each(this._taskListViews, function (tlv, name) {
+    tlv.updateSubtasks(sectionTasks[name]);
+    if (sectionTasks[name].length === 0) {
+      this._$taskListViewsHolders[name].hide();
+    } else {
+     this._$taskListViewsHolders[name].show();
+    }
+  }, this);
+
+  var stats = TickleStats.create();
+  _.each(this._taskListViews, function (tlv) {
+    tlv.tickle(stats);
+  });
+
+  this.$status.text(stats.toString());
+
+};
+DeferredView.prototype.hashArgument = function (arg) {
+  this.refresh();
+};
+
 
 function DragController() {
   this._draggedTasks = null;
@@ -3198,8 +3638,14 @@ function MainLayoutManager($container, controller) {
     "starred" : function () {
       return StarredView.create(controller);
     },
+    "upnext" : function () {
+      return UpNextView.create(controller);
+    },
     "review" : function () {
       return ReviewView.create(controller);
+    },
+    "deferred" : function () {
+      return DeferredView.create(controller);
     }
   };
 
@@ -3315,6 +3761,10 @@ $(function () {
   controller.createTaskMenu(CreateTaskMenu.create(controller).render());
 
   controller.globalKeyHandler(new GlobalKeyHandler({
+    'C-o' : function (e) {
+      e.preventDefault();
+      mlm.doAction('create_task', $('#header [data-action="create_task"]'));
+    }
   }));
 
   new UserInfo().controller(controller).render($('.UserInfo'));

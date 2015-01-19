@@ -193,6 +193,22 @@ html, body {
     max-width: 800px;
 }
 
+.ReviewView {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background: #fff;
+}
+
+.ReviewView-listholder {
+    padding: 4px;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    box-sizing: border-box;
+    max-width: 800px;
+}
+
 .ProjectsView {
     position: relative;
     width: 100%; height: 100%;
@@ -225,6 +241,7 @@ html, body {
     height: 100%;
     padding: 4px;
     box-sizing: border-box;
+    overflow: auto;
 }
 
 .ProjectsView-createTask {
@@ -422,6 +439,7 @@ html, body {
    -webkit-user-drag: none;
     user-drag: none;
 
+    border-radius: 2px;
 }
 .TaskView-button:not(.unbutton):hover {
     color: #555;
@@ -450,6 +468,12 @@ html, body {
     background: #ff6662;
     color: #fff;
     padding: 0 2px;
+}
+
+.TaskView-extraStatus {
+    float: right;
+    display: inline-block;
+    margin-right: 5px;
 }
 
 .TaskView-check {

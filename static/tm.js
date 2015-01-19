@@ -42,6 +42,35 @@ function Request(command, data) {
   });
 }
 
+function LTCompare(a, b) {
+  if (a === b) {
+    return 0;
+  } else if (a < b) {
+    return -1;
+  } else {
+    return 1;
+  }
+}
+function CompareOn(comp, func) {
+  if (typeof func === "string") {
+    return function (a, b) {
+      return comp(a[func](), b[func]());
+    };
+  } else {
+    return function (a, b) {
+      return comp(func(a), func(b));
+    };
+  }
+}
+function Lexicographic(comps) {
+  return function (a, b) {
+    var res;
+    for (var i = 0; i < comps.length; i++) {
+      if (0 !== (res = comps[i](a, b))) return res;
+    }
+    return 0;
+  };
+}
 
 /// other stuff
 
@@ -287,6 +316,9 @@ function EventSystem(o, names) {
       if (typeof names === "string") {
         names = names.match(/\S+/g);
       }
+      if (typeof handler !== 'function') {
+        throw new Error("Handler is not a function");
+      }
       _.each(names, function (name) {
         get_list(name).push(handler);
       });
@@ -294,7 +326,8 @@ function EventSystem(o, names) {
     },
     notify : function (name /*args*/) {
       var args = [o].concat(_.toArray(arguments));
-      _.each(get_list(name), function (f) {
+      var list = get_list(name).slice(); // since a remove may happen during the notify
+      _.each(list, function (f) {
           f.apply(void 0, args);
       });
     },
@@ -323,9 +356,11 @@ function addAccessor(cls, prop, /*opt*/update) {
   function accessor(/*opt*/v) {
     if (arguments.length > 0) {
       if (!setter) throw new Error("Not settable: " + prop);
-      this[_prop] = v;
-      if (update) {
-        update.call(this, prop);
+      if (this[_prop] !== v) {
+        this[_prop] = v;
+        if (update) {
+          update.call(this, prop);
+        }
       }
       return this;
     } else {
@@ -378,6 +413,7 @@ function Task() {
   this._starred = false;
   this._status = null;
   this._status_changed = null;
+  this._reviewed = false;
 
   this._tags = null;
   this._deferred = null;
@@ -396,7 +432,7 @@ addAccessors(Task, [
   "!id", "!title", "!notes",
   "!created", "updated",
   "!parent", "!project_type", "!sort_order",
-  "!status_changed", "!starred",
+  "!status_changed", "!starred", "!reviewed",
   "!tags", "!deadline", "!deleted", "!work_history", "!recurring",
   "!deferred",
 
@@ -414,13 +450,21 @@ Task.prototype.status = function (/*opt*/status) {
     if (!_.contains(Task.statuses, status)) {
       throw new Error("Invalid status " + status);
     }
-    this._status = status;
-    this.status_changed(_.now());
-    this.update();
+    if (this._status !== status) {
+      this._status = status;
+      this.update();
+    }
     return this;
   } else {
     return this._status;
   }
+};
+
+Task.prototype.setStatus = function (status) {
+  return this
+    .status(status)
+    .status_changed(_.now())
+    .reviewed(false);
 };
 
 Task.project_types = [null, "single action", "parallel", "sequential"];
@@ -429,8 +473,10 @@ Task.prototype.project_type = function (/*opt*/project_type) {
     if (!_.contains(Task.project_types, project_type)) {
       throw new Error("Invalid project type " + project_type);
     }
-    this._project_type = project_type;
-    this.update();
+    if (this._project_type !== project_type) {
+      this._project_type = project_type;
+      this.update();
+    }
     return this;
   } else {
     return this._project_type;
@@ -456,14 +502,18 @@ Task.prototype.doUpdate = function () {
   }
 };
 
-Task.compare = function (a, b) {
+Task.compare = Lexicographic([CompareOn(LTCompare, 'sort_order'),
+                              CompareOn(LTCompare, 'title'),
+                              CompareOn(LTCompare, 'created')]);
+
+/*function (a, b) {
   var soa = a.sort_order(), sob = b.sort_order();
   if (soa < sob) return -1;
   else if (soa > sob) return 1;
   else if (a.title() < b.title()) return -1;
   else if (a.title() > b.title()) return 1;
   else return 0;
-};
+};*/
 
 Task.prototype.detachParent = function () {
   if (this.parent() !== null) {
@@ -579,6 +629,7 @@ Task.prototype.toDict = function () {
     starred : this.starred(),
     status : this.status(),
     status_changed : this.status_changed(),
+    reviewed : this.reviewed(),
 
     deferred : this.deferred(),
     deadline : this.deadline()
@@ -626,6 +677,9 @@ Task.prototype.updateFromDict = function (o, taskdb) {
   }
   if (_.has(o, 'status_changed') && this.status_changed() !== o.status_changed) {
     this.status_changed(o.status_changed);
+  }
+  if (_.has(o, 'reviewed') && this.reviewed() !== o.reviewed) {
+    this.reviewed(o.reviewed);
   }
   if (_.has(o, 'deferred') && !_.isEqual(this.deferred(), o.deferred)) {
     this.deferred(o.deferred);
@@ -1000,7 +1054,7 @@ TaskSettingsSelector.prototype.fill = function () {
   $complete.text(nextStatusState === "done" ? "Mark completed" : "Unmark completed");
 
   $complete.on("click", _.im(this, function (e) {
-    this.task().status(nextStatusState);
+    this.task().setStatus(nextStatusState);
   }));
 
   var nextStarState = !this.task().starred();
@@ -1052,6 +1106,15 @@ TaskSettingsSelector.prototype.fill = function () {
   }));
 
   $('<li class="context-menu-divider">').appendTo(this.$list);
+
+  if (this.task().status() === "done") {
+    var nextReviewState = !this.task().reviewed();
+    var $review = $('<li>').appendTo(this.$list);
+    $review.text(nextReviewState ? "Mark reviewed" : "Unmark reviewed");
+    $review.on("click", _.im(this, function (e) {
+      this.task().reviewed(nextReviewState);
+    }));
+  }
 
   var nextDeleteState = !this.task().deleted();
   var $delete = $('<li>').appendTo(this.$list);
@@ -1361,7 +1424,7 @@ TaskView.prototype.remove = function () {
 
 TaskView.prototype.makeNotesArea = function (initial) {
   this.$notesButton.removeClass("transient").addClass("unbutton");
-  this.$notesArea = $('<div class="TaskView-notes">').appendTo(this.$titleArea);
+  this.$notesArea = $('<div class="TaskView-notes">').appendTo(this.$mainArea);
   this.notes = CodeMirror(this.$notesArea[0], {
     value : initial,
     mode : "text",
@@ -1387,11 +1450,11 @@ TaskView.prototype.render = function ($dest) {
 
   this.$container = $('<div class="TaskView-container" draggable="true">').appendTo(this.$el);
   this.updateIndent();
-
   this.$checkArea = $('<div class="TaskView-check">').appendTo(this.$container);
-  var $mainArea = $('<div class="TaskView-main">').appendTo(this.$container);
-  this.$iconArea = $('<div class="TaskView-iconArea">').appendTo($mainArea);
-  this.$titleArea = $('<div class="TaskView-titleArea">').appendTo($mainArea);
+  this.$mainArea = $('<div class="TaskView-main">').appendTo(this.$container);
+  this.$extraStatus = $('<div class="TaskView-extraStatus">').appendTo(this.$mainArea);
+  this.$iconArea = $('<div class="TaskView-iconArea">').appendTo(this.$mainArea);
+  this.$titleArea = $('<div class="TaskView-titleArea">').appendTo(this.$mainArea);
 
   this.$dragDest = $('<div class="TaskView-dragDest">').appendTo(this.$container);
 
@@ -1407,7 +1470,7 @@ TaskView.prototype.render = function ($dest) {
 //  this.$check = $('<input type="checkbox" tabindex="-1">').appendTo(this.$checkArea);
   this.status(this.task().status());
 
-  var $secondArea = $('<div class="TaskView-secondArea">').appendTo(this.$titleArea);
+  var $secondArea = $('<div class="TaskView-secondArea">').appendTo(this.$mainArea);
   this.$notesButton = $('<div class="fa fa-pencil TaskView-button transient" title="Notes">').appendTo($secondArea);
   this.$notesButton.on("click", _.im(this, function (e) {
     e.preventDefault();
@@ -1462,12 +1525,9 @@ TaskView.prototype.render = function ($dest) {
   }));
   
 
-  if (this.task().notes()) {
-    this.makeNotesArea(this.task().notes());
-  }
-
   this.updateProjectProperties();
   this.updateDateProperties();
+  this.updateExtraStatus();
 
   if (this.showSubtasks()) {
     this.taskListView(TaskListView.create(this.controller()).indent(this.indent()+1));
@@ -1519,6 +1579,11 @@ TaskView.prototype.render = function ($dest) {
   } else {
     this.controllerUnselect();
   }
+
+  if (this.task().notes()) {
+    _.defer(_.im(this, function () { this.makeNotesArea(this.task().notes()); }));
+  }
+
 };
 
 TaskView.prototype.titleChanged = function () {
@@ -1538,7 +1603,7 @@ TaskView.prototype.notesChanged = function () {
 TaskView.prototype.statusChanged = function () {
   var newStatus = this.status();
   if (newStatus !== this.task().status()) {
-    this.task().status(newStatus);
+    this.task().setStatus(newStatus);
   }
 };
 
@@ -1694,11 +1759,27 @@ TaskView.prototype.updateDateProperties = function () {
   }
 };
 
+TaskView.prototype.updateExtraStatus = function () {
+  this.$extraStatus.empty();
+  var extraStatusVisible = false;
+  if (this.task().reviewed()) {
+    extraStatusVisible = true;
+    this.$extraStatus.text("Reviewed");
+  } else if (this.task().status() === "done") {
+    extraStatusVisible = true;
+    this.$extraStatus.text("Completed " + shortFuzzyTime(this.task().status_changed()));
+  }
+
+  this.$extraStatus.toggle(extraStatusVisible);
+
+};
+
 TaskView.prototype.taskUpdated = function () {
   if (!this.$el) return;
 
   this.updateProjectProperties();
   this.updateDateProperties();
+  this.updateExtraStatus();
 
   // title
   if (this.task().title() !== this.$title.val()) {
@@ -1728,7 +1809,7 @@ TaskView.prototype.taskUpdated = function () {
       this.notes.hide();
     }
   }
-
+  
   if (this.notes) {
     this.notes.refresh();
   }
@@ -1737,6 +1818,15 @@ TaskView.prototype.taskUpdated = function () {
     this.taskListView().updateSubtasks(this.task().activeSubtasks());
   }
 };
+
+TaskView.prototype.tickle = function () {
+  if (this.notes) {
+    this.notes.refresh();
+  }
+  if (this.taskListView()) {
+    this.taskListView().tickle();
+  }
+}
 
 TaskView.prototype.status = function (/*opt*/status) {
   if (arguments.length > 0) {
@@ -1935,6 +2025,8 @@ ProjectTaskView.prototype.refresh = function () {
                                                }));
   }
 };
+ProjectTaskView.prototype.tickle = function () {
+};
 
 ProjectTaskView.prototype.remove = function () {
   this.detach();
@@ -2029,6 +2121,7 @@ function TaskListView() {
   this._viewFactory = null;
   this._oldTaskViewFilter = _.noop;
   this._insertionFunction = null;
+  this._sortFunction = Task.compare;
   this._subtaskViews = [];
 }
 TaskListView.create = function (controller) {
@@ -2036,7 +2129,8 @@ TaskListView.create = function (controller) {
   return v.controller(controller);
 }
 addAccessors(TaskListView, [
-  "!indent", "!viewFactory", "!subtaskViews", "!oldTaskViewFilter", "!insertionFunction"
+  "!indent", "!viewFactory", "!subtaskViews", "!oldTaskViewFilter", "!insertionFunction",
+  "!sortFunction"
 ]);
 
 TaskListView.prototype.controller = function (/*opt*/controller) {
@@ -2112,13 +2206,12 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
   _.each(old_stvs, function (stv) {
     new_stvs.push(stv);
   }, this);
-  new_stvs.sort(function (a, b) {
-    return Task.compare(a.task(), b.task());
-  });
+  new_stvs.sort(CompareOn(this.sortFunction(), "task"));
 
   if (new_stvs.length !== 0 && new_stvs.length === this.subtaskViews().length
       && _.every(_.zip(new_stvs, this.subtaskViews()), function (stvs) {return stvs[0] === stvs[1]; })) {
     console.log("skipping updateSubtasks");
+    this.tickle();
     return this;
   }
   console.log("noskip");
@@ -2140,6 +2233,7 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
   _.each(new_stvs, function (stv) {
     if (stv.$el) {
       stv.$el.appendTo(this.$el);
+      stv.tickle();
     } else {
       stv.render(this.$el);
     }
@@ -2150,6 +2244,10 @@ TaskListView.prototype.updateSubtasks = function (newTasks) {
   this.subtaskViews(new_stvs);
 
   return this;
+};
+TaskListView.prototype.tickle = function () {
+  console.log("tickle");
+  _.invoke(this.subtaskViews(), "tickle");
 };
 
 TaskListView.prototype.controllerDragStart = function () {
@@ -2852,6 +2950,9 @@ StarredView.prototype.render = function ($dest) {
       .render($list);
   }, this);
 
+  this.refresh();
+
+  return this;
 };
 StarredView.prototype.refresh = function (/*opt*/sweep) {
   this.refreshTimeout = null;
@@ -2895,6 +2996,90 @@ StarredView.prototype.hashArgument = function (arg) {
   this.refresh();
 };
 
+function ReviewView() {
+  this._taskDB = null;
+  this._controller = null;
+  this._taskListView = null;
+}
+addAccessors(ReviewView, [
+  "!controller", "!taskListView"
+]);
+ReviewView.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBCreateHandler) {
+      this.removeTaskDBCreateHandler();
+    }
+    this.removeTaskDBCreateHandler = taskDB.events.on("created updated", _.im(this, "taskCreated"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+ReviewView.prototype.taskCreated = function (task) {
+  if (!this.refreshTimeout) {
+    this.refreshTimeout = window.setTimeout(_.im(this, "refresh"), 0);
+  }
+};
+ReviewView.create = function (controller) {
+  var rv = new this();
+  rv.controller(controller);
+  rv.taskDB(controller.taskDB());
+  return rv;
+};
+ReviewView.prototype.detach = function () {
+  if (this._taskListView) {
+    this._taskListView.detach();
+  }
+  this._taskListView = null;
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+ReviewView.prototype.remove = function () {
+  this.detach();
+  if (this.removeTaskDBCreateHandler) {
+    this.removeTaskDBCreateHandler();
+  }
+};
+ReviewView.prototype.render = function ($dest) {
+  this.$el = $('<div class="ReviewView">').appendTo($dest);
+  this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+  var $holder = $('<div class="ReviewView-listholder">').appendTo(this.$el);
+  this.taskListView(TaskListView.create(this.controller()));
+  this.taskListView()
+    .viewFactory(_.im(this, function (task) {
+      var tv = TaskView.create(this.controller(), task);
+      return tv;
+    }))
+    .oldTaskViewFilter(function (tv) {
+      return tv.task().status() === "done";
+    })
+    .sortFunction(Lexicographic([CompareOn(LTCompare, 'status_changed'),
+                                 Task.compare]))
+    .render($holder);
+
+  this.refresh();
+
+  return this;
+};
+ReviewView.prototype.refresh = function (/*opt*/sweep) {
+  this.refreshTimeout = null;
+  if (sweep) {
+    this.taskListView().clear();
+  }
+  this._tasks = _.filter(this.taskDB()._tasks,
+                         function (task) {
+                           return (!task.deleted()
+                                   && task.status() === "done"
+                                   && !task.reviewed());
+                         });
+  this.taskListView().updateSubtasks(this._tasks);
+};
+ReviewView.prototype.hashArgument = function (arg) {
+  this.refresh();
+};
 
 function DragController() {
   this._draggedTasks = null;
@@ -3013,6 +3198,9 @@ function MainLayoutManager($container, controller) {
     "starred" : function () {
       return StarredView.create(controller);
     },
+    "review" : function () {
+      return ReviewView.create(controller);
+    }
   };
 
   $(window).on("hashchange", _.im(this, "handleHashChange"));

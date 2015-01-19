@@ -710,6 +710,20 @@ li:hover .ProjectTypeSelector-projecticon {
     color: #666;
 }
 
+.CreateTaskMenu {
+    padding: 4px 8px;
+    min-width: 400px;
+}
+.CreateTaskMenu-buttonarea {
+    padding: 4px 0 0 0;
+}
+.CreateTaskMenu-buttonarea input {
+
+}
+.CreateTaskMenu-buttonarea input ~ input {
+    float: right;
+}
+
 .FancyCheckbox {
     -webkit-touch-callout: none;
     -webkit-user-select: none;

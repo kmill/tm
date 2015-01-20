@@ -231,6 +231,22 @@ html, body {
     color: #888;
 }
 
+.SearchView {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background: #fff;
+}
+
+.SearchView-listholder {
+    padding: 4px;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    box-sizing: border-box;
+    max-width: 800px;
+}
+
 
 .UpNextView {
     width: 100%;

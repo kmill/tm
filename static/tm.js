@@ -453,6 +453,7 @@ function Task() {
 
   this._cached_deferred = null;
   this._cached_deadline = null;
+  this._cached_searchtext = null;
 
   new EventSystem(this, "updated");
 }
@@ -521,6 +522,7 @@ Task.prototype.update = function (/*opt*/updateTime) {
 
   this._cached_deferred = null;
   this._cached_deadline = null;
+  this._cached_searchtext = null;
 
   if (updateTime) {
     this._updated = _.now();
@@ -540,7 +542,8 @@ Task.prototype.doUpdate = function () {
 
 Task.compare = Lexicographic([CompareOn(LTCompare, 'sort_order'),
                               CompareOn(LTCompare, 'title'),
-                              CompareOn(LTCompare, 'created')]);
+                              CompareOn(LTCompare, 'created'),
+                              CompareOn(LTCompare, 'id')]);
 
 /*function (a, b) {
   var soa = a.sort_order(), sob = b.sort_order();
@@ -691,6 +694,13 @@ Task.prototype.deadlineStatus = function (pushingIt) {
   } else {
     return "overdue"; 
   }
+};
+
+Task.prototype.matchesSearch = function (w) {
+  if (this._cached_searchtext === null) {
+    this._cached_searchtext = ((this.title() || "") + " " + (this.notes() || "")).toLowerCase();
+  }
+  return this._cached_searchtext.indexOf(w) !== -1;
 };
 
 Task.prototype.toDict = function () {
@@ -3529,6 +3539,109 @@ DeferredView.prototype.hashArgument = function (arg) {
   this.refresh();
 };
 
+function SearchView() {
+  this._taskDB = null;
+  this._controller = null;
+  this._taskListView = null;
+  this._searchString = "";
+  this._$search = null;
+
+  this._lastSearchString = null;
+}
+addAccessors(SearchView, [
+  "!controller", "!taskListView", "!searchString", '!$search'
+]);
+SearchView.prototype.taskDB = function (/*opt*/taskDB) {
+  if (arguments.length > 0) {
+    this._taskDB = taskDB;
+    if (this.removeTaskDBCreateHandler) {
+      this.removeTaskDBCreateHandler();
+    }
+    this.removeTaskDBCreateHandler = taskDB.events.on("created updated", _.im(this, "taskCreated"));
+    return this;
+  } else {
+    return this._taskDB;
+  }
+};
+SearchView.prototype.taskCreated = function (task) {
+  if (!this.refreshTimeout) {
+    this.refreshTimeout = window.setTimeout(_.im(this, "refresh"), 0);
+  }
+};
+SearchView.create = function (controller) {
+  var rv = new this();
+  rv.controller(controller);
+  rv.taskDB(controller.taskDB());
+  return rv;
+};
+SearchView.prototype.detach = function () {
+  if (this._taskListView) {
+    this._taskListView.detach();
+  }
+  this._taskListView = null;
+  if (this.$el) {
+    this.$el.remove();
+    this.$el = null;
+  }
+};
+SearchView.prototype.remove = function () {
+  this.detach();
+  if (this.removeTaskDBCreateHandler) {
+    this.removeTaskDBCreateHandler();
+  }
+};
+SearchView.prototype.render = function ($dest) {
+  this.$el = $('<div class="SearchView">').appendTo($dest);
+  this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+  var $holder = $('<div class="SearchView-listholder">').appendTo(this.$el);
+  this.taskListView(TaskListView.create(this.controller()));
+  this.taskListView()
+    .viewFactory(_.im(this, function (task) {
+      var tv = TaskView.create(this.controller(), task);
+      return tv;
+    }))
+    .oldTaskViewFilter(function (tv) {
+      return true;
+    })
+    .sortFunction(Lexicographic([CompareOn(LTCompare, 'status_changed'),
+                                 Task.compare]))
+    .render($holder);
+
+  this.refresh();
+
+  return this;
+};
+SearchView.prototype.refresh = function (/*opt*/sweep) {
+  this.refreshTimeout = null;
+  if (sweep || this.searchString() !== this._lastSearchString ) {
+    this.taskListView().clear();
+  }
+  this._lastSearchString = this.searchString();
+  if (this.$search() && this.$search().val() !== this.searchString()) {
+    this.$search().val(this.searchString());
+  }
+  var search = this.searchString().toLowerCase().split(/\s+/);
+  if (search.length === 0 || search[0] === '') {
+    // trivial search
+  } else {
+    var tasks = _.filter(this.taskDB()._tasks,
+                         function (task) {
+                           return _.all(search, function (w) {
+                             return task.matchesSearch(w);
+                           });
+                         });
+    this.taskListView().updateSubtasks(tasks);
+  }
+
+  var stats = TickleStats.create();
+  this.taskListView().tickle(stats);
+  this.$status.text(stats.toString());
+};
+SearchView.prototype.hashArgument = function (arg) {
+  this.searchString(decodeURIComponent(arg));
+  this.refresh();
+};
+
 
 function DragController() {
   this._draggedTasks = null;
@@ -3655,7 +3768,10 @@ function MainLayoutManager($container, controller) {
     },
     "deferred" : function () {
       return DeferredView.create(controller);
-    }
+    },
+    "search" : function () {
+      return SearchView.create(controller).$search($('#main_search'));
+    },
   };
 
   $(window).on("hashchange", _.im(this, "handleHashChange"));
@@ -3790,6 +3906,10 @@ $(function () {
     'C-o' : function (e) {
       e.preventDefault();
       mlm.doAction('create_task', $('#header [data-action="create_task"]'));
+    },
+    'C-s' : function (e) {
+      e.preventDefault();
+      $('#main_search').focus().select();
     }
   }));
 
@@ -3823,6 +3943,13 @@ window.mlm= mlm;
     e.preventDefault();
     if (e.which === 1) {
       mlm.doAction($(e.target).closest('[data-action]').attr('data-action'), $(this));
+    }
+  });
+
+  $('#main_search').on("keypress", function (e) {
+    if (e.which === 13) {
+      e.preventDefault();
+      window.location.hash = "search/" + encodeURIComponent($(this).val());
     }
   });
 

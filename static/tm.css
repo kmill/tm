@@ -209,6 +209,29 @@ html, body {
     max-width: 800px;
 }
 
+.ReviewView-reviewall {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+
+    display: inline-block;
+    font-size: 11px;
+    margin-top: 12px;
+    margin-left: 12px;
+    color: #999;
+}
+.ReviewView-reviewall:hover {
+    color: #555;
+}
+.ReviewView-reviewall:active {
+    color: #888;
+}
+
+
 .UpNextView {
     width: 100%;
     height: 100%;

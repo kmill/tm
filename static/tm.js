@@ -3350,6 +3350,15 @@ ReviewView.prototype.render = function ($dest) {
                                  Task.compare]))
     .render($holder);
 
+  this.$reviewAll = $('<div class="ReviewView-reviewall">Mark all as reviewed</div>').appendTo($holder);
+
+  this.$reviewAll.on("click", _.im(this, function (e) {
+    _.each(this._tasks, function (task) {
+      task.reviewed(true);
+    });
+    this.refresh(true);
+  }));
+
   this.refresh();
 
   return this;

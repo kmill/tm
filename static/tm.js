@@ -2167,7 +2167,7 @@ ProjectTaskView.prototype.render = function ($dest) {
 ProjectTaskView.prototype.refresh = function () {
   var available = 0, total = 0;
   _.each(this.task().activeSubtasks(), function (task) {
-    if (task.deferredStatus()) { return; }
+    if (task.deferredStatus() || task.project_type()) { return; }
     total++;
     if (task.available_task()) {
       available++;

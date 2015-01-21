@@ -2637,23 +2637,36 @@ DatabaseSynchronizer.prototype.deferSend = function () {
   _.each(this._toSend, function (b, id) {
     // have to keep version out of backingObject so that _.isEqual works
     var o = _.clone(this._backingObjects[id]);
-    o.version = this.taskDB().byID(id).version();
-    senddata.push(o);
+    var task = this.taskDB().byID(id);
+    o.version = task.version();
+    senddata.push({o : o, updated : task.updated()});
   }, this);
-  console.log("Saving", _.pluck(senddata, "id"));
-  console.log(JSON.stringify(senddata));
+  console.log("Saving", _.pluck(_.pluck(senddata, "o"), "id"));
   this.events.notify("message", "synchronizing");
-  Request("save", {tasks : senddata})
+  Request("save", {tasks : _.pluck(senddata, "o")})
     .then(_.im(this, function () {
       console.log("heard from server");
-      this._toSend = {};
-      this.events.notify("message", "synchronized");
+      _.each(senddata, function (sd) {
+        if (sd.updated === this.taskDB().byID(sd.o.id).updated()) {
+          delete this._toSend[sd.o.id];
+        } // else assuming deferSynchronize is on it
+      }, this);
+      if (_.isEmpty(this._toSend)) {
+        this.events.notify("message", "synchronized");
+      } else {
+        if (!this.sendTimeout) {
+          this.sendTimeout = window.setTimeout(_.im(this, 'deferSend'), this.sendDelay());
+        }
+      }
     }), _.im(this, function (message) {
       console.error(message);
       this.events.notify("message", "error", message);
+      if (!this.sendTimeout) {
+        this.sendTimeout = window.setTimeout(_.im(this, 'deferSend'), this.sendDelay());
+      }
     }))
-    .failure(function () {
-      console.error("Failure in 'save'");
+    .failure(function (e) {
+      console.error(e);
     });
 };
 DatabaseSynchronizer.prototype.receive = function () {

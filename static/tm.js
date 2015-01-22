@@ -3478,9 +3478,10 @@ DeferredView.prototype.render = function ($dest) {
   this.$el = $('<div class="DeferredView">').appendTo($dest);
 
   this.$status = $('<div class="StatusLine">').appendTo(this.$el);
+  this.$holderholder = $('<div class="DeferredView-holder">').appendTo(this.$el);
 
   _.each(this.sections, function (section) {
-    var $holder = $('<div class="DeferredView-section">').appendTo(this.$el);
+    var $holder = $('<div class="DeferredView-section">').appendTo(this.$holderholder);
     this._$taskListViewsHolders[section.name] = $holder;
     
     $holder.append($('<div class="DeferredView-heading">').text(section.name));

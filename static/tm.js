@@ -2647,7 +2647,7 @@ DatabaseSynchronizer.prototype.deferSend = function () {
     .then(_.im(this, function () {
       console.log("heard from server");
       _.each(senddata, function (sd) {
-        if (sd.updated === this.taskDB().byID(sd.o.id).updated()) {
+        if (sd.updated <= this.taskDB().byID(sd.o.id).updated()) {
           delete this._toSend[sd.o.id];
         } // else assuming deferSynchronize is on it
       }, this);

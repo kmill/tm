@@ -352,6 +352,7 @@ html, body {
     height: 100%;
     position: relative;
     background: #fff;
+    overflow: auto;
 }
 
 .DeferredView-heading {
@@ -362,9 +363,8 @@ html, body {
 
 .DeferredView-listholder {
     padding: 4px;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
+/*    width: 100%;
+    height: 100%; */
     box-sizing: border-box;
     max-width: 800px;
 }
